@@ -174,11 +174,13 @@ static int json_parse(struct Tracker * tracker, const char* data) {
   json_object *jlhc;
   if (json_object_object_get_ex(jobj, "lighthouse_config", &jlhc)) {
     if (json_object_object_get_ex(jlhc, "channelMap", &jtmp)) {
-      int s = json_read_arr_int(jtmp, tracker->cal.channels, MAX_NUM_SENSORS);
-      if (s && s < MAX_NUM_SENSORS) {
+      tracker->cal.num_channels = json_read_arr_int(
+        jtmp, tracker->cal.channels, MAX_NUM_SENSORS);
+      if (tracker->cal.num_channels > 0
+       && tracker->cal.num_channels < MAX_NUM_SENSORS) {
         json_object *jnrm;
         if (json_object_object_get_ex(jlhc, "modelNormals", &jnrm)) {
-          for (int i = 0; i < s; i++) {
+          for (int i = 0; i < tracker->cal.num_channels; i++) {
             jtmp = json_object_array_get_idx(jnrm, i);
             if (!json_read_arr_dbl(jtmp, tracker->cal.normals[i], 3))
               printf("Could not read the normal for channel %u\n", i);
@@ -186,7 +188,7 @@ static int json_parse(struct Tracker * tracker, const char* data) {
         }
         json_object *jpts;
         if (json_object_object_get_ex(jlhc, "modelPoints", &jpts)) {
-          for (int i = 0; i < s; i++) {
+          for (int i = 0; i < tracker->cal.num_channels; i++) {
             jtmp = json_object_array_get_idx(jpts, i);
             if (!json_read_arr_dbl(jtmp, tracker->cal.positions[i], 3))
               printf("Could not read the position for channel %u\n", i);
