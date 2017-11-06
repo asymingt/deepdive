@@ -42,6 +42,11 @@
 #include <stdint.h>
 #include <string.h>
 
+// Uncomment the line below if you want the IMU in the tracker
+// frame (this might affect scale and bias parameters). By
+// default we keep this in the IMU frame.
+// #define IMU_FRAME_TRACKER
+
 #define MAX_NUM_LIGHTHOUSES   2
 #define MAX_NUM_SENSORS       32
 #define MAX_SERIAL_LENGTH     32

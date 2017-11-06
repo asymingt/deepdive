@@ -114,15 +114,23 @@ static void watchman_decode(struct Tracker * tracker, uint8_t *buf) {
     // Timecode is wrapping milliseconds
     uint32_t timecode = (time1<<24)|(time2<<16)|buf[0];
     // Accelerometer (moved from imu-frame to tracker-frame)
-    int16_t acc[3];
+    int16_t acc[3], gyr[3];
+#ifdef IMU_FRAME_TRACKER
     acc[0] =  *((int16_t*)(buf+1));
     acc[1] = -*((int16_t*)(buf+5));
     acc[2] = -*((int16_t*)(buf+3));
-    // Gyro (moved from imu-frame to tracker-frame)
-    int16_t gyr[3];
     gyr[0] = -*((int16_t*)(buf+7));
     gyr[1] =  *((int16_t*)(buf+11));
     gyr[2] =  *((int16_t*)(buf+9));
+#else
+    acc[0] = *((int16_t*)(buf+1));
+    acc[1] = *((int16_t*)(buf+3));
+    acc[2] = *((int16_t*)(buf+5));
+    gyr[0] = *((int16_t*)(buf+7));
+    gyr[1] = *((int16_t*)(buf+9));
+    gyr[2] = *((int16_t*)(buf+11));
+#endif
+
     // Process the data
     /*
     printf("[%u] ", timecode);

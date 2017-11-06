@@ -56,15 +56,22 @@ void deepdive_dev_tracker_light(struct Tracker * tracker,
 void deepdive_dev_tracker_imu(struct Tracker * tracker,
   const uint8_t *buf, int32_t len) {
   // Accelerometer (moved from imu-frame to tracker-frame)
-  int16_t acc[3];
-  acc[0] =  *((int16_t*)(buf+1));
-  acc[1] = -*((int16_t*)(buf+5));
-  acc[2] = -*((int16_t*)(buf+3));
-  // Gyro (moved from imu-frame to tracker-frame)
-  int16_t gyr[3];
-  gyr[0] = -*((int16_t*)(buf+7));
-  gyr[1] =  *((int16_t*)(buf+11));
-  gyr[2] =  *((int16_t*)(buf+9));
+  int16_t acc[3], gyr[3];
+#ifdef IMU_FRAME_TRACKER
+    acc[0] =  *((int16_t*)(buf+1));
+    acc[1] = -*((int16_t*)(buf+5));
+    acc[2] = -*((int16_t*)(buf+3));
+    gyr[0] = -*((int16_t*)(buf+7));
+    gyr[1] =  *((int16_t*)(buf+11));
+    gyr[2] =  *((int16_t*)(buf+9));
+#else
+    acc[0] = *((int16_t*)(buf+1));
+    acc[1] = *((int16_t*)(buf+3));
+    acc[2] = *((int16_t*)(buf+5));
+    gyr[0] = *((int16_t*)(buf+7));
+    gyr[1] = *((int16_t*)(buf+9));
+    gyr[2] = *((int16_t*)(buf+11));
+#endif
   // Timecode is wrapping milliseconds
   uint32_t timecode = *((uint32_t*)(buf+13));
   // Process the data
