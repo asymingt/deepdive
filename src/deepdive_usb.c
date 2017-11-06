@@ -158,6 +158,8 @@ static int json_parse(struct Tracker * tracker, const char* data) {
   json_object *jobj = json_tokener_parse(data);
   json_object *jtmp;
   // IMU calibration parameters
+  if (json_object_object_get_ex(jobj, "device_serial_number", &jtmp))
+    strcpy(tracker->serial, json_object_get_string(jtmp));
   if (json_object_object_get_ex(jobj, "acc_bias", &jtmp))
     if (!json_read_arr_dbl(jtmp, tracker->cal.acc_bias, 3))
       printf("Could not read the JSON field: acc_bias\n");
@@ -270,6 +272,13 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
     printf( "Error: data for config descriptor is bad. (%d)", len);
     return -5;
   }
+  /*
+  char fstname[128];
+  sprintf(fstname, "%s.json.gz", tracker->serial);
+  FILE *f = fopen( fstname, "wb" );
+  fwrite(uncompressed_data, len, 1, f);
+  fclose(f);
+  */
   // Parse the JSON data structure
   return json_parse(tracker, uncompressed_data);
 }
@@ -334,7 +343,6 @@ int deepdive_usb_init(struct Driver * drv) {
      // USB TRACKER //
      /////////////////
      case USB_PROD_TRACKER:
-     printf("Found tracker %s\n", tracker->serial);
       tracker->endpoints[0].tracker = tracker;
       tracker->endpoints[0].type = TRACKER_IMU;
       tracker->endpoints[0].tx = libusb_alloc_transfer(0);
@@ -365,12 +373,12 @@ int deepdive_usb_init(struct Driver * drv) {
         printf("Power on success\n");
       // Get the configuration for this device
       ret = get_config(tracker, 0);
+      printf("Found tracker %s\n", tracker->serial);
       break;
      ///////////////////////
      // WIRELESS WATCHMAN //
      ///////////////////////
      case USB_PROD_WATCHMAN:
-      printf("Found watchman %s\n", tracker->serial);
       // Set up the interrupts
       tracker->endpoints[0].tracker = tracker;
       tracker->endpoints[0].type = WATCHMAN;
@@ -385,6 +393,7 @@ int deepdive_usb_init(struct Driver * drv) {
         goto fail;
       // Get the configuration for this device
       ret = get_config(tracker, 1);
+      printf("Found watchman %s\n", tracker->serial);
       break;
     }
     // Add the tracker to the dynamic list of trackers

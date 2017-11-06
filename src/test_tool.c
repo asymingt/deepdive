@@ -36,27 +36,27 @@
 void my_light_process(struct Tracker * tracker, uint32_t timecode,
   uint8_t lh, uint8_t ax, uint8_t sensor, uint16_t angle, uint16_t length) {
   if (lh == 0 && ax == 0)
-    printf("[%u] L X #%s SEN (%2u) ANG (%5u) LEN (%5d)\n",
+    printf("[%u][%s] L X SEN (%2u) ANG (%5u) LEN (%5d)\n",
       timecode + angle, tracker->serial, sensor, angle, length);
   if (lh == 0 && ax == 1)
-    printf("[%u] L Y #%s SEN (%2u) ANG (%5u) LEN (%5d)\n",
+    printf("[%u][%s] L Y SEN (%2u) ANG (%5u) LEN (%5d)\n",
       timecode + angle, tracker->serial, sensor, angle, length);
   if (lh == 1 && ax == 0)
-    printf("[%u] R X #%s SEN (%2u) ANG (%5u) LEN (%5d)\n",
+    printf("[%u][%s] R X SEN (%2u) ANG (%5u) LEN (%5d)\n",
       timecode + angle, tracker->serial, sensor, angle, length);
   if (lh == 1 && ax == 1)
-    printf("[%u] R Y #%s SEN (%2u) ANG (%5u) LEN (%5d)\n",
+    printf("[%u][%s] R Y SEN (%2u) ANG (%5u) LEN (%5d)\n",
       timecode + angle, tracker->serial, sensor, angle, length);
 }
 
 void my_imu_process(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]) {
-  printf("[%u] I - #%s ACC (%4d,%4d,%4d) GYR (%4d,%4d,%4d)\n", timecode,
+  printf("[%u][%s] I - ACC (%4d,%4d,%4d) GYR (%4d,%4d,%4d)\n", timecode,
     tracker->serial, acc[0], acc[1], acc[2], gyr[0], gyr[1], gyr[2]);
 }
 
 void my_but_process(struct Tracker * tracker, uint32_t timecode, uint8_t mask) {
-  printf("[%u] B - #%s %u%u%u%u%u%u%u%un", timecode, tracker->serial,
+  printf("[%u][%s] B - %u%u%u%u%u%u%u%un", timecode, tracker->serial,
     mask & (1<<7) ? 1 : 0,
     mask & (1<<6) ? 1 : 0,
     mask & (1<<5) ? 1 : 0,
