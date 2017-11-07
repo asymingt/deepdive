@@ -79,8 +79,8 @@ int main() {
   }
   // Install callbacks
   deepdive_install_lig_fn(drv, my_light_process);
-  //deepdive_install_imu_fn(drv, my_imu_process);
-  //deepdive_install_but_fn(drv, my_but_process);
+  deepdive_install_imu_fn(drv, my_imu_process);
+  deepdive_install_but_fn(drv, my_but_process);
   // Keep going until ctrl+c
   while(deepdive_poll(drv) == 0) {}
     return 0;

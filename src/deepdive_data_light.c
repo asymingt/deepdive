@@ -35,13 +35,10 @@
 
 #include <zlib.h>
 
-// OOTX constants
+// OOTX CODE
+
 #define MAX_PACKET_LEN  64
 #define PREAMBLE_LENGTH 17
-#define SYNC_VALUE      0x1
-#define STEP_SIZE       400000
-#define STEP_VAR        250
-#define SYNC_TIMEOUT    10000000
 
 // OOTX state machine for each lighthouse
 typedef enum {PREAMBLE, LENGTH, PAYLOAD, CHECKSUM} State;
@@ -144,11 +141,17 @@ static uint32_t swapl(uint32_t val) {
 }
 
 // Process a single bit of the OOTX data
-static void ootx_feed(struct Driver *drv,OOTX* ctx, uint8_t bit, uint32_t tc) {
+static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) {
+  // OOTX decoders to gather base station configuration
+  static OOTX ootx[MAX_NUM_LIGHTHOUSES];
+  if (lh >= MAX_NUM_LIGHTHOUSES)
+    return;
+  // Get the correct context for this OOTX
+  OOTX *ctx = &ootx[lh];
   // Always check for preamble and reset if needed
   if (bit) {
     if (ctx->preamble >= PREAMBLE_LENGTH) {
-      //printf("Preamble found\n");
+      // printf("Preamble found\n");
       ctx->state = LENGTH;
       ctx->length = 0;
       ctx->pos = 0;
@@ -168,9 +171,9 @@ static void ootx_feed(struct Driver *drv,OOTX* ctx, uint8_t bit, uint32_t tc) {
   case LENGTH:
     if (ctx->syn == 16) {
       ctx->length = swaps(ctx->length);   // LE to BE
-      //printf("LEN: %u for LH %u\n", ctx->length, ctx->id);
+      //printf("LEN: %u for LH %u\n", ctx->length, lh);
       ctx->pad = (ctx->length % 2);       // Force even num bytes
-      //printf("PAD: %u for LH %u\n", ctx->pad , ctx->id);
+      //printf("PAD: %u for LH %u\n", ctx->pad , lh);
       ctx->state = PREAMBLE;
       if (ctx->length + ctx->pad <= MAX_PACKET_LEN) {
         //printf("[PRE] -> [PAY]\n");
@@ -236,94 +239,153 @@ static void ootx_feed(struct Driver *drv,OOTX* ctx, uint8_t bit, uint32_t tc) {
   }
 }
 
-// Get the acode from the sync pulse length
-static uint8_t get_acode_from_sync_pulse(uint16_t len) {
-  return (uint8_t)((len - 2750) / 500);
+// LIGHTCAP
+
+typedef struct {
+  uint32_t sweep_time[MAX_NUM_SENSORS];
+  uint16_t sweep_len[MAX_NUM_SENSORS];
+} lightcaps_sweep_data;
+
+typedef struct {
+  int recent_sync_time;
+  int activeSweepStartTime;
+  int activeLighthouse;
+  int activeAcode;
+  int lh_start_time[MAX_NUM_LIGHTHOUSES];
+  int lh_max_pulse_length[MAX_NUM_LIGHTHOUSES];
+  int8_t lh_acode[MAX_NUM_LIGHTHOUSES];
+  int current_lh;
+} per_sweep_data;
+
+typedef struct {
+  double acode_offset;
+} global_data;
+
+typedef struct {
+  lightcaps_sweep_data sweep;
+  per_sweep_data per_sweep;
+  global_data global;
+} lightcap_data;
+
+// Get the acode from the 
+int handle_acode(lightcap_data* lcd, int length) {
+  double old_offset = lcd->global.acode_offset;
+  double new_offset = (((length) + 250) % 500) - 250;
+  lcd->global.acode_offset = old_offset * 0.9 + new_offset * 0.1;
+  return (uint8_t)((length - 2750) / 500);
 }
 
-// Get the lighthouse from the time code
-static uint8_t timecodes_match(uint32_t ref, uint32_t sample) {
-  static uint32_t diff;
-  if (ref == 0)
-    return 1;
-  if (ref > sample)
-    return 0;
-  diff = (sample - ref) % STEP_SIZE;
-  // printf("%u\n", diff);
-  return ((diff < STEP_VAR || diff > STEP_SIZE - STEP_VAR) ? 1 : 0);
-}
-
-/* Phase is indeed an offset correction to bearing angles from
-   the sync rising edge to hit centroid. Tilt is the clocking of
-   the fan beam lens away from its ideal; beam parallel to axis
-   of rotation. Curve is an approximate correction for the lens
-   axis not being perfectly radial which causes the fan beam
-   to curve into a conic instead of being perfectly planar.
-   Gibbous is a correction for the laser/mirror/lens alignment
-   errors, it is a 2pi periodic correction to bearing angles 
-   expressed as a phase and magnitude. You can think of it as
-   the 1st Fourier term while phase is the 0th.                */
-
-// Process light data
-void deepdive_data_light(struct Tracker * tracker,
-  uint32_t timecode, uint16_t sensor, uint16_t length) {
-  // Statically allocated so we don't need to attach to the Tracker context
-  static uint32_t last_tc = 0;
-  static uint8_t  last_lh = MAX_NUM_LIGHTHOUSES;
-  static uint8_t  last_ax = MAX_NUM_MOTORS;
-  static OOTX ootx[MAX_NUM_LIGHTHOUSES];
-  ootx[0].id = 0;
-  ootx[1].id = 1;
-  // Reject sensor or pulse lengths that are too high
-  if (sensor > MAX_NUM_SENSORS || length > 6750)
-    return;
-  // Pulse durations greater than 2750 are sync packets, since the
-  // maximum pulse duration of a sweep is well below this value.
-  if (length > 2750) {
-    // Get the acode from the sync packet
-    uint8_t acode = get_acode_from_sync_pulse(length);
-    uint8_t le = (acode & 0x4) ? 1 : 0; // Laser enabled
-    uint8_t da = (acode & 0x2) ? 1 : 0; // Data bit
-    uint8_t ax = (acode & 0x1) ? 1 : 0; // Laser axis
-    uint8_t lh = MAX_NUM_LIGHTHOUSES;   // Unknown
-    // Now we don't know which lighthouse this acode actually came from,
-    // because both lighthouses continually transmit all 8 possible codes.
-    // So, we're going to have to resolve this using the timecode. I am
-    // assuming there is a relativey constant stride between pulses. In this
-    // case any two timecodes (m,n) from a single lighthouse will satisfy:
-    //     (n - m) % 4000000 < 2
-    // This approach is not perfect, but it seems to work in practice.
-    for (uint8_t i = 0; i < MAX_NUM_LIGHTHOUSES; i++) {
-      if (timecode - ootx[i].lasttime > SYNC_TIMEOUT)
-        ootx[i].lasttime = timecode;
-      if (timecodes_match(ootx[i].lasttime, timecode)) {
-        ootx_feed(tracker->driver, &ootx[i], da, timecode);
-        ootx[i].lasttime = timecode;
-        lh = i;
-        break;
-      }
-    }
-    // If the laser was not enabled on this spin, then we should not update
-    // the per-sweep information, since we don't expect any pulses from it!
-    if (!le) return;
-    // If we managed to determine the lighthouse from which the sync was
-    // produced, when we can adjust the "last" values, which persist.
-    if (lh < MAX_NUM_LIGHTHOUSES) {
-      last_tc = timecode;
-      last_ax = ax;
-      last_lh = lh;
-      return;
-    }
-    // If we get here then it means that our laser was enabled but we don't
-    // know the lighthouse. So, we should discard the information.
-    last_lh = MAX_NUM_LIGHTHOUSES;
-    return;
-  // Everything else is a sensor measurement. We should only process
-  // the measurement if we know the lh and axis from the last sweep.
-  } else if (last_lh < MAX_NUM_LIGHTHOUSES) {
-    if (tracker->driver->lig_fn) {
-      tracker->driver->lig_fn(tracker, last_tc, last_lh,
-        last_ax, sensor, timecode - last_tc, length);
+// Handle measuements
+void handle_measurements(struct Tracker * tracker, lightcap_data* lcd) {
+  unsigned int longest_pulse = 0;
+  unsigned int timestamp_of_longest_pulse = 0;
+  for (int i = 0; i < MAX_NUM_SENSORS; i++) {
+    if (lcd->sweep.sweep_len[i] > longest_pulse) {
+      longest_pulse = lcd->sweep.sweep_len[i];
+      timestamp_of_longest_pulse = lcd->sweep.sweep_time[i];
     }
   }
+  int allZero = 1;
+  for (int q = 0; q < 32; q++)
+    if (lcd->sweep.sweep_len[q] != 0)
+      allZero = 0;
+  for (int i = 0; i < MAX_NUM_SENSORS; i++) {
+    static int counts[MAX_NUM_SENSORS][2] = {0};
+    if (lcd->per_sweep.activeLighthouse > -1 && !allZero) {
+      if (lcd->sweep.sweep_len[i] == 0)
+        counts[i][lcd->per_sweep.activeAcode & 1] = 0;
+    }
+    if (lcd->sweep.sweep_len[i] != 0) {
+      int offset_from = lcd->sweep.sweep_time[i]
+        - lcd->per_sweep.activeSweepStartTime + lcd->sweep.sweep_len[i] / 2;
+      if (tracker->driver->lig_fn)
+        tracker->driver->lig_fn(tracker, lcd->sweep.sweep_time[i],
+          lcd->per_sweep.activeLighthouse, lcd->per_sweep.activeAcode & 1,
+            i, offset_from, lcd->sweep.sweep_len[i]);
+    }
+  }
+  memset(&lcd->sweep, 0, sizeof(lightcaps_sweep_data));
+}
+
+// Handle sync
+void handle_sync(struct Tracker * tracker, lightcap_data* lcd,
+  uint32_t timecode, uint16_t sensor, uint16_t length) {
+  // Get the acode from the sendor treading
+  int acode = handle_acode(lcd, length);
+  // Process any cached measurements
+  handle_measurements(tracker, lcd);
+  // Calculate the time since last sweet
+  int time_since_last_sync = (timecode - lcd->per_sweep.recent_sync_time);
+  // Store up sync pulses so we can take the earliest starting time 
+  if (time_since_last_sync < 2400) {
+    lcd->per_sweep.recent_sync_time = timecode;
+    if (length > lcd->per_sweep.lh_max_pulse_length[lcd->per_sweep.current_lh]) {
+      lcd->per_sweep.lh_max_pulse_length[lcd->per_sweep.current_lh] = length;
+      lcd->per_sweep.lh_start_time[lcd->per_sweep.current_lh] = timecode;
+      lcd->per_sweep.lh_acode[lcd->per_sweep.current_lh] = acode;
+    }
+  } else if (time_since_last_sync < 24000) {
+    lcd->per_sweep.activeLighthouse = -1;
+    lcd->per_sweep.recent_sync_time = timecode;
+    lcd->per_sweep.current_lh = 1;
+    lcd->per_sweep.lh_start_time[lcd->per_sweep.current_lh] = timecode;
+    lcd->per_sweep.lh_max_pulse_length[lcd->per_sweep.current_lh] = length;
+    lcd->per_sweep.lh_acode[lcd->per_sweep.current_lh] = acode;
+  } else if (time_since_last_sync > 370000) {
+    // Initialize here
+    memset(&lcd->per_sweep, 0, sizeof(lcd->per_sweep));
+    lcd->per_sweep.activeLighthouse = -1; 
+    for (uint8_t i = 0; i < MAX_NUM_LIGHTHOUSES; ++i)
+      lcd->per_sweep.lh_acode[i] = -1;
+    lcd->per_sweep.recent_sync_time = timecode;
+    lcd->per_sweep.current_lh = 0;
+    lcd->per_sweep.lh_start_time[lcd->per_sweep.current_lh] = timecode;
+    lcd->per_sweep.lh_max_pulse_length[lcd->per_sweep.current_lh] = length;
+    lcd->per_sweep.lh_acode[lcd->per_sweep.current_lh] = acode;
+  }
+  // Feed the lighthouse OOTX decoder with the data bit
+  if (lcd->per_sweep.current_lh < MAX_NUM_LIGHTHOUSES) {
+    ootx_feed(tracker->driver, lcd->per_sweep.current_lh,
+     ((acode & 0x2) ? 1 : 0), timecode);
+  }
+}
+
+// Called to process sweep events
+void handle_sweep(struct Tracker * tracker, lightcap_data* lcd,
+  uint32_t timecode, uint16_t sensor, uint16_t length) {
+  // Reset the active lighthouse, start time and acode
+  lcd->per_sweep.activeLighthouse = -1;
+  lcd->per_sweep.activeSweepStartTime = 0;
+  lcd->per_sweep.activeAcode = 0;
+  for (uint8_t i = 0; i < MAX_NUM_LIGHTHOUSES; ++i) {
+    int acode = lcd->per_sweep.lh_acode[i];
+    if ((acode >= 0) && !(acode >> 2 & 1)) {
+      lcd->per_sweep.activeLighthouse = i;
+      lcd->per_sweep.activeSweepStartTime = lcd->per_sweep.lh_start_time[i];
+      lcd->per_sweep.activeAcode = acode;
+    }
+  }
+  // Check that we have an active lighthouse
+  if (lcd->per_sweep.activeLighthouse < 0) {
+    //printf("WARNING: No active lighthouse!\n");
+    //printf("%2d %8d %d %d\n", sensor, length,
+    //  lcd->per_sweep.lh_acode[0], lcd->per_sweep.lh_acode[1]);
+    return;
+  }
+
+  if (lcd->sweep.sweep_len[sensor] < length) {
+    lcd->sweep.sweep_len[sensor] = length;
+    lcd->sweep.sweep_time[sensor] = timecode;
+  }
+}
+
+void deepdive_data_light(struct Tracker * tracker,
+  uint32_t timecode, uint16_t sensor, uint16_t length) {
+  static lightcap_data data;
+  if (sensor > MAX_NUM_SENSORS) return;
+  if (length > 6750) return;
+  if (length > 2750)
+    handle_sync(tracker, &data, timecode, sensor, length);
+  else
+    handle_sweep(tracker, &data, timecode, sensor, length);
 }
