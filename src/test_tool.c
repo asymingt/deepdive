@@ -34,23 +34,26 @@
 #include <deepdive.h>
 
 void my_light_process(struct Tracker * tracker, uint32_t timecode,
-  uint8_t lh, uint8_t ax, uint8_t sensor, uint16_t angle, uint16_t length) {
+  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length) {
+  float angcnv = (180.0 / 400000.0) * ((float)(angle) - 200000.0);
+  float lencnv = ((float)length) / 48000000.0 * 1000000.0;
   if (lh == 0 && ax == 0)
-    printf("[%u][%s] L X SEN (%2u) ANG (%5u) LEN (%5d)\n",
-      timecode + angle, tracker->serial, sensor, angle, length);
+    printf("[%u][%s] L X SEN (%2u) ANG (%f deg) LEN (%f us)\n",
+      timecode, tracker->serial, sensor, angcnv, lencnv);
   if (lh == 0 && ax == 1)
-    printf("[%u][%s] L Y SEN (%2u) ANG (%5u) LEN (%5d)\n",
-      timecode + angle, tracker->serial, sensor, angle, length);
+    printf("[%u][%s] L Y SEN (%2u) ANG (%f deg) LEN (%f us)\n",
+      timecode, tracker->serial, sensor, angcnv, lencnv);
   if (lh == 1 && ax == 0)
-    printf("[%u][%s] R X SEN (%2u) ANG (%5u) LEN (%5d)\n",
-      timecode + angle, tracker->serial, sensor, angle, length);
+    printf("[%u][%s] R X SEN (%2u) ANG (%f deg) LEN (%f us)\n",
+      timecode, tracker->serial, sensor, angcnv, lencnv);
   if (lh == 1 && ax == 1)
-    printf("[%u][%s] R Y SEN (%2u) ANG (%5u) LEN (%5d)\n",
-      timecode + angle, tracker->serial, sensor, angle, length);
+    printf("[%u][%s] R Y SEN (%2u) ANG (%f deg) LEN (%f us)\n",
+      timecode, tracker->serial, sensor, angcnv, lencnv);
 }
 
 void my_imu_process(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]) {
+
   printf("[%u][%s] I - ACC (%4d,%4d,%4d) GYR (%4d,%4d,%4d)\n", timecode,
     tracker->serial, acc[0], acc[1], acc[2], gyr[0], gyr[1], gyr[2]);
 }
@@ -76,8 +79,8 @@ int main() {
   }
   // Install callbacks
   deepdive_install_lig_fn(drv, my_light_process);
-  deepdive_install_imu_fn(drv, my_imu_process);
-  deepdive_install_but_fn(drv, my_but_process);
+  //deepdive_install_imu_fn(drv, my_imu_process);
+  //deepdive_install_but_fn(drv, my_but_process);
   // Keep going until ctrl+c
   while(deepdive_poll(drv) == 0) {}
     return 0;

@@ -113,7 +113,7 @@ struct Tracker {
 
 // Callbacks
 typedef void (*lig_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t lh, uint8_t ax, uint8_t sensor, uint16_t angle, uint16_t length);
+  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length);
 typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
 typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
