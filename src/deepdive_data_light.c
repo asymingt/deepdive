@@ -228,7 +228,7 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
         //printf("[CRC] RX = %08x\n", swapl(ctx->crc));
         //printf("[CRC] CA = %08x\n", crc);
         if (crc == swapl(ctx->crc))
-          decode_packet(drv, ctx->id, ctx->data, tc);
+          decode_packet(drv, lh, ctx->data, tc);
         // Return to state
         ctx->state = PREAMBLE;
         ctx->pos = ctx->syn = 0;
