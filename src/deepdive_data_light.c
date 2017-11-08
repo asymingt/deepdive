@@ -94,7 +94,11 @@ static float convert_float(uint8_t* data) {
 }
 
 // Convert the packet
-static void decode_packet(struct Lighthouse * lh, uint8_t *data, uint32_t tc) {
+static void decode_packet(struct Driver *drv, uint8_t id,
+  uint8_t *data, uint32_t tc) {
+  // Get a reference to the lighthouse
+  struct Lighthouse *lh = &drv->lighthouses[id];
+  // Populate the data
   sprintf(lh->serial, "%u", *(uint32_t*)(data + 0x02));
   lh->fw_version = *(uint16_t*)(data + 0x00);
   lh->motors[0].phase = convert_float(data + 0x06);
@@ -116,6 +120,9 @@ static void decode_packet(struct Lighthouse * lh, uint8_t *data, uint32_t tc) {
   lh->sys_faults = *(int8_t*)(data + 0x20);
   lh->timestamp = tc;
   printf("[%10u] RX lighthouse config for #%s\n", tc, lh->serial);
+  // Push the new lighthouse data to the callee
+  if (drv->lighthouse_fn)
+    drv->lighthouse_fn(lh);
   /*
   printf("Lighthouse FW: %u\n", lh->fw_version);
   printf("Lighthouse MODE: %c\n", (lh->mode_current == 1 ? 'b' : 'c'));
@@ -220,7 +227,7 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
         //printf("[CRC] RX = %08x\n", swapl(ctx->crc));
         //printf("[CRC] CA = %08x\n", crc);
         if (crc == swapl(ctx->crc))
-          decode_packet(&drv->lighthouses[ctx->id], ctx->data, tc);
+          decode_packet(drv, ctx->id, ctx->data, tc);
         // Return to state
         ctx->state = PREAMBLE;
         ctx->pos = ctx->syn = 0;

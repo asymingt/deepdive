@@ -42,6 +42,8 @@ struct Driver * deepdive_init() {
   struct Driver *drv = malloc(sizeof(struct Driver));
   if (drv == NULL)
     return NULL;
+  // We haven't yet pushed the data
+  drv->pushed = 0;
   // General constants
   drv->general.timebase_hz            = 48000000UL; // Ticks per second
   drv->general.timecenter_ticks       = 200000UL;   // Midpoint of sweep
@@ -60,6 +62,8 @@ struct Driver * deepdive_init() {
   return drv;
 }
 
+// CALLBACKS
+
 // Register a light callback function
 void deepdive_install_lig_fn(struct Driver * drv,  lig_func fbp) {
   if (drv == NULL) return;
@@ -77,6 +81,26 @@ void deepdive_install_but_fn(struct Driver * drv, but_func fbp) {
   if (drv == NULL) return;
   if (fbp) drv->but_fn = fbp;
 }
+
+// Register an button callback function
+void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp) {
+  if (drv == NULL) return;
+  if (fbp) drv->tracker_fn = fbp;
+}
+
+// Register an button callback function
+void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp) {
+  if (drv == NULL) return;
+  if (fbp) drv->lighthouse_fn = fbp;
+}
+
+// Register an button callback function
+void deepdive_install_general_fn(struct Driver * drv, general_func fbp) {
+  if (drv == NULL) return;
+  if (fbp) drv->general_fn = fbp;
+}
+
+// GETTERS
 
 // Get the general configuration data
 struct General * deepdive_general(struct Driver * drv) {
@@ -107,6 +131,14 @@ struct Tracker * deepdive_tracker(struct Driver * drv, const char* id) {
 // Poll the driver for events
 int deepdive_poll(struct Driver * drv) {
   if (drv == NULL) return -1;
+  // Push general and tracker config
+  if (drv->pushed == 0) {
+    if (drv->general_fn) drv->general_fn(&drv->general);
+    for (uint16_t i = 0; i < drv->num_trackers; i++)
+      if (drv->tracker_fn) drv->tracker_fn(drv->trackers[i]);
+    drv->pushed = 1;
+  }
+  // Handle any USB events
   return libusb_handle_events(drv->usb);
 }
 

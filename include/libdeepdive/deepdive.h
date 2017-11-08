@@ -84,40 +84,32 @@ struct Endpoint {
 
 // Calibration for a given tracker
 struct Calibration {
-  uint32_t timestamp;                   // Time of last update
-  uint8_t num_channels;                 // Number of photodiodes (PDs)
-  uint8_t channels[MAX_NUM_SENSORS];    // Channel assignment for PDs
-  float positions[MAX_NUM_SENSORS][3];  // PD positions
-  float normals[MAX_NUM_SENSORS][3];    // PD normals
-  float acc_bias[3];                    // Acceleromater bias
-  float acc_scale[3];                   // Accelerometer scale
-  float gyr_bias[3];                    // Gyro bias
-  float gyr_scale[3];                   // Gyro scale
+  uint32_t timestamp;                       // Time of last update
+  uint8_t num_channels;                     // Number of photodiodes (PDs)
+  uint8_t channels[MAX_NUM_SENSORS];        // Channel assignment for PDs
+  float positions[MAX_NUM_SENSORS][3];      // PD positions
+  float normals[MAX_NUM_SENSORS][3];        // PD normals
+  float acc_bias[3];                        // Acceleromater bias
+  float acc_scale[3];                       // Accelerometer scale
+  float gyr_bias[3];                        // Gyro bias
+  float gyr_scale[3];                       // Gyro scale
 };
 
 // Information about a tracked device
 struct Tracker {
-  uint16_t type;
-  struct Driver * driver;
-  struct libusb_device_handle * udev;
-  char serial[MAX_SERIAL_LENGTH];
-  struct Endpoint endpoints[MAX_ENDPOINTS];
-  struct Calibration cal;
-  uint8_t charge;
-  uint8_t ischarging:1;
-  uint8_t ison:1;
-  uint8_t axis[3];
-  uint8_t buttonmask;
-  uint32_t timecode;
+  uint16_t type;                            // Tracker type
+  struct Driver * driver;                   // Parent driver
+  struct libusb_device_handle * udev;       // Udev handle
+  char serial[MAX_SERIAL_LENGTH];           // Serial number
+  struct Endpoint endpoints[MAX_ENDPOINTS]; // USB endpoints
+  struct Calibration cal;                   // Calibration data
+  uint8_t charge;                           // Current charge
+  uint8_t ischarging:1;                     // Charging?
+  uint8_t ison:1;                           // Turned on?
+  uint8_t axis[3];                          // Gravitational axis
+  uint8_t buttonmask;                       // Buttom mask
+  uint32_t timecode;                        // Timecode of last update
 };
-
-// Callbacks
-typedef void (*lig_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length);
-typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
-  int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
-typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t mask);
 
 // Motor information
 typedef enum {
@@ -169,16 +161,31 @@ struct General {
   int32_t pulse_synctime_slack;   // 5,000      (guessed)
 };
 
+// Callbacks
+typedef void (*lig_func)(struct Tracker * tracker, uint32_t timecode,
+  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length);
+typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
+  int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
+typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
+  uint8_t mask);
+typedef void (*tracker_func)(struct Tracker * tracker);
+typedef void (*lighthouse_func)(struct Lighthouse * lighthouse);
+typedef void (*general_func)(struct General * general);
+
 // Driver context
 struct Driver {
   struct libusb_context* usb;
   uint16_t num_trackers;
   struct Tracker **trackers;
-  lig_func lig_fn;
-  imu_func imu_fn;
-  but_func but_fn;
+  lig_func lig_fn;               // Called when new light data arrives
+  imu_func imu_fn;               // Called when new IMU data arrives
+  but_func but_fn;               // Called when new button data arrives
+  tracker_func tracker_fn;       // Called when tracker cal info is ready
+  lighthouse_func lighthouse_fn; // Called when lighthouse cal info is ready
+  general_func general_fn;       // Called when general cal info is ready
   struct Lighthouse lighthouses[MAX_NUM_LIGHTHOUSES];
-  struct General general;
+  struct General general;        // General configuration
+  uint8_t pushed;                // Have we pushed thie tracker/general config
 };
 
 // Initialize the driver
@@ -192,6 +199,15 @@ void deepdive_install_imu_fn(struct Driver * drv, imu_func fbp);
 
 // Register an button callback function
 void deepdive_install_but_fn(struct Driver * drv, but_func fbp);
+
+// Register an button callback function
+void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp);
+
+// Register an button callback function
+void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp);
+
+// Register an button callback function
+void deepdive_install_general_fn(struct Driver * drv, general_func fbp);
 
 // Get the general configuration data
 struct General * deepdive_general(struct Driver * drv);
