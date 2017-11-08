@@ -139,6 +139,7 @@ struct Motor {
 // Lighthouse information
 struct Lighthouse {
   uint32_t timestamp;                   // Time of last update (0 = invalud)
+  uint8_t id;                           // ID of this lighthouse
   uint16_t fw_version;                  // Firmware version
   char serial[MAX_SERIAL_LENGTH];       // Unique serial number
   struct Motor motors[MAX_NUM_MOTORS];  // Motor calibration data

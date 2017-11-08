@@ -100,6 +100,7 @@ static void decode_packet(struct Driver *drv, uint8_t id,
   struct Lighthouse *lh = &drv->lighthouses[id];
   // Populate the data
   sprintf(lh->serial, "%u", *(uint32_t*)(data + 0x02));
+  lh->id = id; // Resolved ID
   lh->fw_version = *(uint16_t*)(data + 0x00);
   lh->motors[0].phase = convert_float(data + 0x06);
   lh->motors[1].phase = convert_float(data + 0x08);
