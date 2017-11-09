@@ -37,24 +37,6 @@
 
 // OOTX CODE
 
-#define MAX_PACKET_LEN  64
-#define PREAMBLE_LENGTH 17
-
-// OOTX state machine for each lighthouse
-typedef enum {PREAMBLE, LENGTH, PAYLOAD, CHECKSUM} State;
-typedef struct {
-  State state;                    // Current RX state
-  uint8_t data[MAX_PACKET_LEN];   // Data buffer
-  uint16_t length;                // Length in bytes
-  uint8_t pad;                    // Padding length in bytes : 0 or 1
-  uint16_t pos;                   // Bit position
-  uint16_t syn;                   // Sync bit counter
-  uint32_t crc;                   // CRC32 Checksum
-  uint8_t preamble;               // Preamble
-  uint32_t lasttime;              // Last sync time
-  uint8_t id;                     // Lighthouse id
-} OOTX;
-
 // Avoids compiler reording with -O2
 union custom_float {
   uint32_t i;
@@ -94,13 +76,38 @@ static float convert_float(uint8_t* data) {
 }
 
 // Convert the packet
-static void decode_packet(struct Driver *drv, uint8_t id,
+static void decode_packet(struct Tracker *tracker, uint8_t id,
   uint8_t *data, uint32_t tc) {
-  // Get a reference to the lighthouse
-  struct Lighthouse *lh = &drv->lighthouses[id];
-  // Populate the data
-  sprintf(lh->serial, "%u", *(uint32_t*)(data + 0x02));
-  lh->id = id; // Resolved ID
+  // Pop the serial number off the packet, so we can perform a lookup
+  static char serial[MAX_SERIAL_LENGTH];
+  sprintf(serial, "%u", *(uint32_t*)(data + 0x02));
+
+  // We need to search to see if we already know about this LH
+  uint8_t idx, available = MAX_NUM_LIGHTHOUSES;
+  for (idx = 0; idx < MAX_NUM_LIGHTHOUSES; idx++) {
+    // If there is not timestamp with this lighthouse, then this is a
+    // free record, which we will use in the case the serial is not found.
+    if (!tracker->driver->lighthouses[idx].timestamp &&
+      available == MAX_NUM_LIGHTHOUSES) available = idx;
+    // If we find the tracker
+    if (!strcmp(tracker->driver->lighthouses[idx].serial, serial))
+      break;
+  }
+
+  // We should never really be in the position where we get OOTX packets
+  // from more than two lighthouses. But, if we do, you should see this...
+  if (idx >= MAX_NUM_LIGHTHOUSES) {
+    if (available == MAX_NUM_LIGHTHOUSES) {
+      printf("We appear to have seen more than MAX_NUM_LIGHTHOUSES\n");
+      printf("We are therefore going to disregard this OOTX data :(\n");
+      return;
+    }
+    idx = available;
+  }
+
+  // Populate this data
+  struct Lighthouse *lh = &tracker->driver->lighthouses[idx]; 
+  strcpy(lh->serial, serial);
   lh->fw_version = *(uint16_t*)(data + 0x00);
   lh->motors[0].phase = convert_float(data + 0x06);
   lh->motors[1].phase = convert_float(data + 0x08);
@@ -120,18 +127,16 @@ static void decode_packet(struct Driver *drv, uint8_t id,
   lh->mode_current = *(int8_t*)(data + 0x1f);
   lh->sys_faults = *(int8_t*)(data + 0x20);
   lh->timestamp = tc;
-  printf("[%10u] RX lighthouse config for #%s\n", tc, lh->serial);
+  printf("[%10u] RX lighthouse config for %s (id: %u)\n",
+    tc, lh->serial, id);
+
+  // There is no guarantee that two given trackers will enumerate the
+  // same lighthouses as id 0 and id 1. So we need a lookup!
+  tracker->ootx[id].lighthouse = lh;
+
   // Push the new lighthouse data to the callee
-  if (drv->lighthouse_fn)
-    drv->lighthouse_fn(lh);
-  /*
-  printf("Lighthouse FW: %u\n", lh->fw_version);
-  printf("Lighthouse MODE: %c\n", (lh->mode_current == 1 ? 'b' : 'c'));
-  printf("Lighthouse phase motor 0: %f\n", lh->motors[0].phase);
-  printf("Lighthouse tilt motor 0: %f\n", lh->motors[0].tilt);
-  printf("Lighthouse phase motor 1: %f\n", lh->motors[1].phase);
-  printf("Lighthouse tilt motor 1: %f\n", lh->motors[1].tilt);
-  */
+  if (tracker->driver->lighthouse_fn)
+    tracker->driver->lighthouse_fn(lh);
 }
 
 // Swap endianness of 16 bit unsigned integer
@@ -149,13 +154,13 @@ static uint32_t swapl(uint32_t val) {
 }
 
 // Process a single bit of the OOTX data
-static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) {
+static void ootx_feed(struct Tracker *tracker, 
+  uint8_t lh, uint8_t bit, uint32_t tc) {
   // OOTX decoders to gather base station configuration
-  static OOTX ootx[MAX_NUM_LIGHTHOUSES];
   if (lh >= MAX_NUM_LIGHTHOUSES)
     return;
   // Get the correct context for this OOTX
-  OOTX *ctx = &ootx[lh];
+  OOTX *ctx = &tracker->ootx[lh];
   // Always check for preamble and reset if needed
   if (bit) {
     if (ctx->preamble >= PREAMBLE_LENGTH) {
@@ -179,12 +184,12 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
   case LENGTH:
     if (ctx->syn == 16) {
       ctx->length = swaps(ctx->length);   // LE to BE
-      //printf("LEN: %u for LH %u\n", ctx->length, lh);
+      // printf("LEN: %u for LH %u\n", ctx->length, lh);
       ctx->pad = (ctx->length % 2);       // Force even num bytes
-      //printf("PAD: %u for LH %u\n", ctx->pad , lh);
+      // printf("PAD: %u for LH %u\n", ctx->pad , lh);
       ctx->state = PREAMBLE;
       if (ctx->length + ctx->pad <= MAX_PACKET_LEN) {
-        //printf("[PRE] -> [PAY]\n");
+        // printf("[PRE] -> [PAY]\n");
         ctx->state = PAYLOAD;
         ctx->syn = ctx->pos = 0;
         memset(ctx->data, 0x0, MAX_PACKET_LEN);
@@ -200,7 +205,7 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
       ctx->pos++;
       // If we can't decrement pointer then we have received all the data
       if (ctx->pos == ctx->length + ctx->pad) {
-        //printf("[PAY] -> [CRC]\n");
+        // printf("[PAY] -> [CRC]\n");
         ctx->state = CHECKSUM;
         ctx->syn = ctx->pos = 0;
         ctx->crc = 0;
@@ -224,11 +229,11 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
         uint32_t crc = crc32( 0L, 0 /*Z_NULL*/, 0 );
         crc = crc32(crc, ctx->data, ctx->length);
         // Print some debug info
-        //printf("[CRC] -> [PRE]\n");
-        //printf("[CRC] RX = %08x\n", swapl(ctx->crc));
-        //printf("[CRC] CA = %08x\n", crc);
+        // printf("[CRC] -> [PRE]\n");
+        // printf("[CRC] RX = %08x\n", swapl(ctx->crc));
+        // printf("[CRC] CA = %08x\n", crc);
         if (crc == swapl(ctx->crc))
-          decode_packet(drv, lh, ctx->data, tc);
+          decode_packet(tracker, lh, ctx->data, tc);
         // Return to state
         ctx->state = PREAMBLE;
         ctx->pos = ctx->syn = 0;
@@ -249,32 +254,6 @@ static void ootx_feed(struct Driver *drv, uint8_t lh, uint8_t bit, uint32_t tc) 
 
 // LIGHTCAP
 
-typedef struct {
-  uint32_t sweep_time[MAX_NUM_SENSORS];
-  uint16_t sweep_len[MAX_NUM_SENSORS];
-} lightcaps_sweep_data;
-
-typedef struct {
-  int recent_sync_time;
-  int activeSweepStartTime;
-  int activeLighthouse;
-  int activeAcode;
-  int lh_start_time[MAX_NUM_LIGHTHOUSES];
-  int lh_max_pulse_length[MAX_NUM_LIGHTHOUSES];
-  int8_t lh_acode[MAX_NUM_LIGHTHOUSES];
-  int current_lh;
-} per_sweep_data;
-
-typedef struct {
-  double acode_offset;
-} global_data;
-
-typedef struct {
-  lightcaps_sweep_data sweep;
-  per_sweep_data per_sweep;
-  global_data global;
-} lightcap_data;
-
 // Get the acode from the 
 int handle_acode(lightcap_data* lcd, int length) {
   double old_offset = lcd->global.acode_offset;
@@ -284,7 +263,9 @@ int handle_acode(lightcap_data* lcd, int length) {
 }
 
 // Handle measuements
-void handle_measurements(struct Tracker * tracker, lightcap_data* lcd) {
+void handle_measurements(struct Tracker * tracker) {
+  // Get the tracker-specific lightcap data
+  lightcap_data* lcd = &tracker->lcd;
   unsigned int longest_pulse = 0;
   unsigned int timestamp_of_longest_pulse = 0;
   for (int i = 0; i < MAX_NUM_SENSORS; i++) {
@@ -294,34 +275,63 @@ void handle_measurements(struct Tracker * tracker, lightcap_data* lcd) {
     }
   }
   int allZero = 1;
-  for (int q = 0; q < 32; q++)
+  for (int q = 0; q < MAX_NUM_SENSORS; q++)
     if (lcd->sweep.sweep_len[q] != 0)
       allZero = 0;
+
+  // Temporary data structures to hold results
+  static uint16_t num_sensors;
+  static uint16_t sensors[MAX_NUM_SENSORS];
+  static uint32_t sweeptimes[MAX_NUM_SENSORS];
+  static uint32_t angles[MAX_NUM_SENSORS];
+  static uint16_t lengths[MAX_NUM_SENSORS];
+  static uint32_t st;
+  static uint8_t lh;
+  static uint8_t ax;
+
+  // Get the sync pulse rising edge time, lighthouse and axis
+  st = lcd->per_sweep.activeSweepStartTime;
+  lh = lcd->per_sweep.activeLighthouse;
+  ax = lcd->per_sweep.activeAcode & 1;
+
+  // Copy over the final data
+  num_sensors = 0;
   for (int i = 0; i < MAX_NUM_SENSORS; i++) {
     static int counts[MAX_NUM_SENSORS][2] = {0};
-    if (lcd->per_sweep.activeLighthouse > -1 && !allZero) {
+    if (lcd->per_sweep.activeLighthouse > -1 && !allZero)
       if (lcd->sweep.sweep_len[i] == 0)
         counts[i][lcd->per_sweep.activeAcode & 1] = 0;
-    }
     if (lcd->sweep.sweep_len[i] != 0) {
-      int offset_from = lcd->sweep.sweep_time[i]
+      sensors[num_sensors] = i;
+      sweeptimes[num_sensors] = lcd->sweep.sweep_time[i];
+      angles[num_sensors] = lcd->sweep.sweep_time[i]
         - lcd->per_sweep.activeSweepStartTime + lcd->sweep.sweep_len[i] / 2;
-      if (tracker->driver->lig_fn)
-        tracker->driver->lig_fn(tracker, lcd->sweep.sweep_time[i],
-          lcd->per_sweep.activeLighthouse, lcd->per_sweep.activeAcode & 1,
-            i, offset_from, lcd->sweep.sweep_len[i]);
+      lengths[num_sensors] = lcd->sweep.sweep_len[i];
+      num_sensors++;
     }
   }
+
+  // Push off the measurement bundle ONLY when we have received
+  // an OOTX from the current lighthouse and if we have data
+  if (num_sensors > 0 && tracker->ootx[lh].lighthouse) {
+    if (tracker->driver->lig_fn)
+      tracker->driver->lig_fn(tracker, tracker->ootx[lh].lighthouse,
+        ax, st, num_sensors, sensors, sweeptimes, angles, lengths);
+  }
+
+  // Clear memory
   memset(&lcd->sweep, 0, sizeof(lightcaps_sweep_data));
 }
 
 // Handle sync
-void handle_sync(struct Tracker * tracker, lightcap_data* lcd,
+void handle_sync(struct Tracker * tracker,
   uint32_t timecode, uint16_t sensor, uint16_t length) {
+  // Get the tracker-specific lightcap data
+  lightcap_data* lcd = &tracker->lcd;
   // Get the acode from the sendor treading
   int acode = handle_acode(lcd, length);
   // Process any cached measurements
-  handle_measurements(tracker, lcd);
+  handle_measurements(tracker);
   // Calculate the time since last sweet
   int time_since_last_sync = (timecode - lcd->per_sweep.recent_sync_time);
   // Store up sync pulses so we can take the earliest starting time 
@@ -353,14 +363,16 @@ void handle_sync(struct Tracker * tracker, lightcap_data* lcd,
   }
   // Feed the lighthouse OOTX decoder with the data bit
   if (lcd->per_sweep.current_lh < MAX_NUM_LIGHTHOUSES) {
-    ootx_feed(tracker->driver, lcd->per_sweep.current_lh,
+    ootx_feed(tracker, lcd->per_sweep.current_lh,
      ((acode & 0x2) ? 1 : 0), timecode);
   }
 }
 
 // Called to process sweep events
-void handle_sweep(struct Tracker * tracker, lightcap_data* lcd,
+void handle_sweep(struct Tracker * tracker,
   uint32_t timecode, uint16_t sensor, uint16_t length) {
+  // Get the tracker-specific lightcap data
+  lightcap_data* lcd = &tracker->lcd;
   // Reset the active lighthouse, start time and acode
   lcd->per_sweep.activeLighthouse = -1;
   lcd->per_sweep.activeSweepStartTime = 0;
@@ -374,13 +386,9 @@ void handle_sweep(struct Tracker * tracker, lightcap_data* lcd,
     }
   }
   // Check that we have an active lighthouse
-  if (lcd->per_sweep.activeLighthouse < 0) {
-    //printf("WARNING: No active lighthouse!\n");
-    //printf("%2d %8d %d %d\n", sensor, length,
-    //  lcd->per_sweep.lh_acode[0], lcd->per_sweep.lh_acode[1]);
+  if (lcd->per_sweep.activeLighthouse < 0)
     return;
-  }
-
+  // Store the data
   if (lcd->sweep.sweep_len[sensor] < length) {
     lcd->sweep.sweep_len[sensor] = length;
     lcd->sweep.sweep_time[sensor] = timecode;
@@ -389,11 +397,10 @@ void handle_sweep(struct Tracker * tracker, lightcap_data* lcd,
 
 void deepdive_data_light(struct Tracker * tracker,
   uint32_t timecode, uint16_t sensor, uint16_t length) {
-  static lightcap_data data;
   if (sensor > MAX_NUM_SENSORS) return;
   if (length > 6750) return;
   if (length > 2750)
-    handle_sync(tracker, &data, timecode, sensor, length);
+    handle_sync(tracker, timecode, sensor, length);
   else
-    handle_sweep(tracker, &data, timecode, sensor, length);
+    handle_sweep(tracker, timecode, sensor, length);
 }

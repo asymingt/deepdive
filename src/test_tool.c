@@ -33,31 +33,38 @@
 
 #include <deepdive.h>
 
-void my_light_process(struct Tracker * tracker, uint32_t timecode,
-  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length) {
-  float angcnv = (180.0 / 400000.0) * ((float)(angle) - 200000.0);
-  float lencnv = ((float)length) / 48000000.0 * 1000000.0;
-  if (lh == 0 && ax == 0)
-    printf("[%u][%s] L X SEN (%2u) ANG (%f deg) LEN (%f us)\n",
-      timecode, tracker->serial, sensor, angcnv, lencnv);
-  if (lh == 0 && ax == 1)
-    printf("[%u][%s] L Y SEN (%2u) ANG (%f deg) LEN (%f us)\n",
-      timecode, tracker->serial, sensor, angcnv, lencnv);
-  if (lh == 1 && ax == 0)
-    printf("[%u][%s] R X SEN (%2u) ANG (%f deg) LEN (%f us)\n",
-      timecode, tracker->serial, sensor, angcnv, lencnv);
-  if (lh == 1 && ax == 1)
-    printf("[%u][%s] R Y SEN (%2u) ANG (%f deg) LEN (%f us)\n",
-      timecode, tracker->serial, sensor, angcnv, lencnv);
+// Callback to display light info
+void my_light_process(struct Tracker * tracker, struct Lighthouse * lighthouse,
+  uint8_t axis, uint32_t synctime, uint16_t num_sensors, uint16_t *sensors,
+    uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths) {
+  static float angcnv, lencnv;
+  // Print header info
+  printf("[%u] # %s LH %s AXIS %c\n", synctime, tracker->serial,
+    lighthouse->serial, (axis ? 'Y' : 'X'));
+  // Print sensor info
+  for (uint16_t i = 0; i < num_sensors; i++) {
+    angcnv = (180.0 / 400000.0) * ((float)(angles[i]) - 200000.0);
+    lencnv = ((float)lengths[i]) / 48000000.0 * 1000000.0;
+    printf(" ->  SEN (%2u) ANG (%f deg) LEN (%f us)\n",
+      sensors[i], angcnv, lencnv);
+  }
 }
 
+// Callback to display imu info
 void my_imu_process(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]) {
-
-  printf("[%u][%s] I - ACC (%4d,%4d,%4d) GYR (%4d,%4d,%4d)\n", timecode,
-    tracker->serial, acc[0], acc[1], acc[2], gyr[0], gyr[1], gyr[2]);
+  static float a[3], g[3];
+  a[0] = (float)(acc[0]) * (9.80665/4096.0);
+  a[1] = (float)(acc[1]) * (9.80665/4096.0);
+  a[2] = (float)(acc[2]) * (9.80665/4096.0);
+  g[0] = (float)(gyr[0]) * ((1./32.768)*(3.14159/180.));
+  g[1] = (float)(gyr[1]) * ((1./32.768)*(3.14159/180.));
+  g[2] = (float)(gyr[2]) * ((1./32.768)*(3.14159/180.));
+  printf("[%010u] # %s I - ACC (%7.3f,%7.3f,%7.3f) GYR (%7.3f,%7.3f,%7.3f)\n", timecode,
+    tracker->serial, a[0], a[1], a[2], g[0], g[1], g[2]);
 }
 
+// Callback to display button info
 void my_but_process(struct Tracker * tracker, uint32_t timecode, uint8_t mask) {
   printf("[%u][%s] B - %u%u%u%u%u%u%u%un", timecode, tracker->serial,
     mask & (1<<7) ? 1 : 0,

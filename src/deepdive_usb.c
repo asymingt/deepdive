@@ -280,7 +280,8 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
   fclose(f);
   */
   // Parse the JSON data structure
-  return json_parse(tracker, uncompressed_data);
+  json_parse(tracker, uncompressed_data);
+  return 0;
 }
 
 // Enumerate all USBs on the bus and return the number of devices found
@@ -316,6 +317,10 @@ int deepdive_usb_init(struct Driver * drv) {
     if (!tracker)
       continue;
     tracker->driver = drv;
+
+    // Null the lighthouse pointer
+    for (size_t i = 0; i < MAX_NUM_LIGHTHOUSES; i++)
+      tracker->ootx[i].lighthouse = NULL;
 
     // Try and open the device
     ret = libusb_open(dev, &tracker->udev);
@@ -373,6 +378,10 @@ int deepdive_usb_init(struct Driver * drv) {
         printf("Power on success\n");
       // Get the configuration for this device
       ret = get_config(tracker, 0);
+      if (ret < 0) {
+        printf("Calibration cannot be pulled. Ignoring.\n");
+        goto fail;
+      }
       printf("Found tracker %s\n", tracker->serial);
       break;
      ///////////////////////
@@ -393,6 +402,10 @@ int deepdive_usb_init(struct Driver * drv) {
         goto fail;
       // Get the configuration for this device
       ret = get_config(tracker, 1);
+      if (ret < 0) {
+        printf("Calibration cannot be pulled. Ignoring.\n");
+        goto fail;
+      }
       printf("Found watchman %s\n", tracker->serial);
       break;
     }

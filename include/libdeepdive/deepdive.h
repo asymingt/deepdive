@@ -47,6 +47,9 @@
 // default we keep this in the IMU frame.
 // #define IMU_FRAME_TRACKER
 
+#define MAX_PACKET_LEN        64
+#define PREAMBLE_LENGTH       17
+
 #define MAX_NUM_LIGHTHOUSES   2
 #define MAX_NUM_SENSORS       32
 #define MAX_SERIAL_LENGTH     32
@@ -95,6 +98,47 @@ struct Calibration {
   float gyr_scale[3];                       // Gyro scale
 };
 
+typedef struct {
+  uint32_t sweep_time[MAX_NUM_SENSORS];
+  uint16_t sweep_len[MAX_NUM_SENSORS];
+} lightcaps_sweep_data;
+
+typedef struct {
+  int recent_sync_time;
+  int activeSweepStartTime;
+  int activeLighthouse;
+  int activeAcode;
+  int lh_start_time[MAX_NUM_LIGHTHOUSES];
+  int lh_max_pulse_length[MAX_NUM_LIGHTHOUSES];
+  int8_t lh_acode[MAX_NUM_LIGHTHOUSES];
+  int current_lh;
+} per_sweep_data;
+
+typedef struct {
+  double acode_offset;
+} global_data;
+
+typedef struct {
+  lightcaps_sweep_data sweep;
+  per_sweep_data per_sweep;
+  global_data global;
+} lightcap_data;
+
+// OOTX state machine for each lighthouse
+typedef enum {PREAMBLE, LENGTH, PAYLOAD, CHECKSUM} State;
+typedef struct {
+  State state;                    // Current RX state
+  uint8_t data[MAX_PACKET_LEN];   // Data buffer
+  uint16_t length;                // Length in bytes
+  uint8_t pad;                    // Padding length in bytes : 0 or 1
+  uint16_t pos;                   // Bit position
+  uint16_t syn;                   // Sync bit counter
+  uint32_t crc;                   // CRC32 Checksum
+  uint8_t preamble;               // Preamble
+  uint32_t lasttime;              // Last sync time
+  struct Lighthouse *lighthouse;  // Lighthouse reference...
+} OOTX;
+
 // Information about a tracked device
 struct Tracker {
   uint16_t type;                            // Tracker type
@@ -103,6 +147,8 @@ struct Tracker {
   char serial[MAX_SERIAL_LENGTH];           // Serial number
   struct Endpoint endpoints[MAX_ENDPOINTS]; // USB endpoints
   struct Calibration cal;                   // Calibration data
+  lightcap_data lcd;                        // Lightcap data
+  OOTX ootx[MAX_NUM_LIGHTHOUSES];           // OOTX data
   uint8_t charge;                           // Current charge
   uint8_t ischarging:1;                     // Charging?
   uint8_t ison:1;                           // Turned on?
@@ -163,8 +209,9 @@ struct General {
 };
 
 // Callbacks
-typedef void (*lig_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t lh, uint8_t ax, uint8_t sensor, uint32_t angle, uint16_t length);
+typedef void (*lig_func)(struct Tracker * tracker, struct Lighthouse * lighthouse,
+  uint8_t axis, uint32_t synctime, uint16_t num_sensors,
+  uint16_t *sensors,  uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths);
 typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
 typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
