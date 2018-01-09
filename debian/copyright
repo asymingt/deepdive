@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: libjps3d
-Source: https://github.com/mwatterson/jps3d
+Upstream-Name: libdeepdive
+Source: https://github.com/asymingt/libdeepdive
 
 Files: *
 Code was originally forked from libsurvive, a library developed by the open source community, using information from those who built the hardware. There is an active libsurvive community on Discord, which should be the first point of contact.
