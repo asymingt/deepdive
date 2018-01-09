@@ -17,7 +17,7 @@ Description: Development headers for pulling raw data from Vive Trackers.
 
 Package: libdeepdive0
 Architecture: any
-Depends: zlib1g-dev (>=1.2.8), libjson0 (>=0.11), libusb-1.0-0 (>=1.0.20), ${shlibs:Depends}, ${misc:Depends}
+Depends: zlib1g (>=1.2.8), libjson0 (>=0.11), libusb-1.0-0 (>=1.0.20), ${shlibs:Depends}, ${misc:Depends}
 Description: A low-level library for HTC Vive Trackers
  This library provides a mechanism for pulling data from Vive Trackers, plugged
  into USB or wirelessly using a Steam Watchman adapter. Multiple trackers and
