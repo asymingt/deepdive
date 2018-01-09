@@ -1,3 +1,11 @@
 /ros/
 /build/
 *.sublime-workspace
+/obj-x86_64-linux-gnu/
+/debian/libdeepdive-dev/
+/debian/libdeepdive0/
+/debian/tmp/
+/debian/*.log
+/debian/*.substvars
+/debian/files
+/debian/debhelper-build-stamp
