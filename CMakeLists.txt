@@ -45,38 +45,15 @@ add_executable(deepdive_tool
 target_link_libraries(deepdive_tool
   deepdive)
 
-# Add all targets to the build-tree export set
-export(TARGETS deepdive deepdive_tool
-  FILE "${PROJECT_BINARY_DIR}/deepdiveTargets.cmake")
- 
-# Export the package for use from the build-tree
-export(PACKAGE deepdive)
-
-# Create the FooBarConfig.cmake and FooBarConfigVersion files
-set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}/include")
-configure_file(cmake/deepdiveConfig.cmake.in
-  "${PROJECT_BINARY_DIR}/deepdiveConfig.cmake" @ONLY)
-configure_file(cmake/deepdiveConfigVersion.cmake.in
-  "${PROJECT_BINARY_DIR}/deepdiveConfigVersion.cmake" @ONLY)
+# Create an uninstall script for covenience
 configure_file(cmake/deepdiveUninstall.cmake.in
   "${PROJECT_BINARY_DIR}/deepdiveUninstall.cmake" @ONLY)
 
 # Installation, should you need to
 install(TARGETS deepdive deepdive_tool
-  EXPORT deepdiveTargets
-  RUNTIME DESTINATION bin COMPONENT bin
-  LIBRARY DESTINATION lib COMPONENT shlib
+  RUNTIME DESTINATION bin
+  LIBRARY DESTINATION lib
   PUBLIC_HEADER DESTINATION "include/deepdive" COMPONENT dev)
-
-# Install the export set for use with the install-tree
-install(EXPORT deepdiveTargets DESTINATION
-  share/libdeepdive COMPONENT dev)
-
-# Install the cmake files
-install(FILES
-  "${PROJECT_BINARY_DIR}/deepdiveConfig.cmake"
-  "${PROJECT_BINARY_DIR}/deepdiveConfigVersion.cmake"
-  DESTINATION share/libdeepdive COMPONENT dev)
 
 # Allow for the files to be uninstalled
 add_custom_target(uninstall
