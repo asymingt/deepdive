@@ -40,8 +40,6 @@ include_directories(
 
 ## THIS PROJECT
 
-message("${DEEPDIVE_INCLUDE_DIRS}")
-
 catkin_simple()
 
 cs_add_executable(deepdive_bridge src/deepdive_bridge.cc)
@@ -50,8 +48,8 @@ target_link_libraries(deepdive_bridge ${DEEPDIVE_LIBRARIES})
 cs_add_executable(deepdive_solver src/deepdive_solver.cc)
 target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
 
-cs_add_executable(deepdive_filter src/deepdive_filter.cc)
-add_dependencies(deepdive_filter ukf)
+#cs_add_executable(deepdive_filter src/deepdive_filter.cc)
+#add_dependencies(deepdive_filter ukf)
 
 cs_install()
 

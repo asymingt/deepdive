@@ -44,6 +44,7 @@ struct Driver * deepdive_init() {
     return NULL;
   // We haven't yet pushed the data
   drv->pushed = 0;
+  drv->num_trackers=0;
   // General constants
   drv->general.timebase_hz            = 48000000UL; // Ticks per second
   drv->general.timecenter_ticks       = 200000UL;   // Midpoint of sweep
@@ -134,7 +135,7 @@ int deepdive_poll(struct Driver * drv) {
   // Push general and tracker config
   if (drv->pushed == 0) {
     if (drv->general_fn) drv->general_fn(&drv->general);
-    for (uint16_t i = 0; i < drv->num_trackers; i++)
+    for (size_t i = 0; i < drv->num_trackers; i++)
       if (drv->tracker_fn) drv->tracker_fn(drv->trackers[i]);
     drv->pushed = 1;
   }
@@ -149,7 +150,6 @@ void deepdive_close(struct Driver * drv) {
     libusb_close(drv->trackers[i]->udev);
     free(drv->trackers[i]);
   }
-  free(drv->trackers);
   libusb_exit(drv->usb);
   free(drv);
 }

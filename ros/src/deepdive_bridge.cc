@@ -41,9 +41,7 @@ static constexpr double ACC_SCALE       = 4096.0;
 static constexpr double SWEEP_DURATION  = 400000.0;
 static constexpr double SWEEP_CENTER    = 200000.0;
 static constexpr double TICKS_PER_SEC   = 48000000.0;
-
-// Main entry point to the Vive low-level driver
-struct Driver* driver_ = nullptr;
+static constexpr double COUNT_TO_TICKS  = 5000.0;
 
 // Data structures for storing lighthouses and trackers
 std::map<std::string, deepdive_ros::Lighthouse> lighthouses_;
@@ -58,19 +56,22 @@ ros::ServiceServer srv_lighthouse_;
 
 // Convert time an return overflow count
 ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
-  // If we can't find the tracker don't return a valid time
+  // If we can't find the tracker we must initialize the tickstore and
+  // lastcount. The lastcount is used to track the counter to see if it
+  // has overflowed. The tickcount stores the number of ticks
   if (trackers_.find(serial) == trackers_.end()) {
-    ROS_WARN_STREAM("Cannot covert time for tracker " << serial);
-    return ros::Time(0);
+    trackers_[serial].tickstore = 0;
+    trackers_[serial].lastcount = 0;
   }
-  // Count the number of overflows
+  // Count the number of overflows to accumulate the correct number of ticks
   if (trackers_[serial].lastcount > timecode)
     trackers_[serial].tickstore += static_cast<double>(UINT32_MAX);
+  trackers_[serial].tickstore += timecode;
+  trackers_[serial].tickstore -= trackers_[serial].lastcount;
   // Backup the timecode for use in next iteration
   trackers_[serial].lastcount = timecode;
   // Add the tick store to the time code and covert to seconds
-  return ros::Time((trackers_[serial].tickstore + 
-    static_cast<double>(timecode)) / TICKS_PER_SEC);
+  return ros::Time(trackers_[serial].tickstore / TICKS_PER_SEC * 1000.0);
 }
 
 // Callback to display light info
@@ -132,7 +133,7 @@ void ButtonCallback(struct Tracker * tracker, uint32_t timecode,
 
 // Configuration call from the vive_tool
 void TrackerCallback(struct Tracker * t) {
-  if (!driver_ || !t) return;
+  if (!t) return;
   deepdive_ros::Tracker & msg = trackers_[t->serial];
   // Set the serial number
   msg.serial = t->serial;
@@ -159,11 +160,19 @@ void TrackerCallback(struct Tracker * t) {
   msg.gyr_scale.x = t->cal.gyr_scale[0];
   msg.gyr_scale.y = t->cal.gyr_scale[1];
   msg.gyr_scale.z = t->cal.gyr_scale[2];
+  // Set the default IMU transform
+  msg.imu_transform.rotation.x = t->cal.imu_transform[0];
+  msg.imu_transform.rotation.y = t->cal.imu_transform[1];
+  msg.imu_transform.rotation.z = t->cal.imu_transform[2];
+  msg.imu_transform.rotation.w = t->cal.imu_transform[3];
+  msg.imu_transform.translation.x = t->cal.imu_transform[4];
+  msg.imu_transform.translation.y = t->cal.imu_transform[5];
+  msg.imu_transform.translation.z = t->cal.imu_transform[6];
 }
 
 // Configuration call from the vive_tool
 void LighthouseCallback(struct Lighthouse *l) {
-  if (!driver_ || !l) return;
+  if (!l) return;
   deepdive_ros::Lighthouse & msg = lighthouses_[l->serial];
   msg.serial = l->serial;
   msg.motors.resize(2);
@@ -175,6 +184,9 @@ void LighthouseCallback(struct Lighthouse *l) {
     msg.motors[i].gibmag = l->motors[i].gibmag;
     msg.motors[i].curve = l->motors[i].curve;
   }
+  msg.acceleration.x = l->accel[0];
+  msg.acceleration.y = l->accel[1];
+  msg.acceleration.z = l->accel[2];
 }
 
 // Get a single or list of lighthouses 
@@ -224,31 +236,28 @@ int main(int argc, char **argv) {
 
   // Try to initialize vive
   struct Driver *driver = deepdive_init();
-  if (!driver_) {
-    ROS_FATAL("Deepdive initialization failed");
+  if (!driver) {
+    ROS_ERROR("Deepdive initialization failed");
     return 1;
   }
 
   // Install the callbacks
-  deepdive_install_lig_fn(driver_, LightCallback);
-  deepdive_install_imu_fn(driver_, ImuCallback);
-  deepdive_install_but_fn(driver_, ButtonCallback);
-  deepdive_install_lighthouse_fn(driver_, LighthouseCallback);
-  deepdive_install_tracker_fn(driver_, TrackerCallback);
+  deepdive_install_lig_fn(driver, LightCallback);
+  deepdive_install_imu_fn(driver, ImuCallback);
+  deepdive_install_but_fn(driver, ButtonCallback);
+  deepdive_install_lighthouse_fn(driver, LighthouseCallback);
+  deepdive_install_tracker_fn(driver, TrackerCallback);
 
   // Set active to true on initialization
   while (ros::ok()) {
     // Poll the ros driver for activity
-    if (deepdive_poll(driver_)) {
-      ROS_FATAL("Deepdive low-level driver encountered a problem");
-      return 2;
-    }
+    deepdive_poll(driver);
     // Flush the ROS messaging queue
     ros::spinOnce();
   }
 
   // Close the vive context
-  deepdive_close(driver_);
+  deepdive_close(driver);
 
   // Success!
   return 0;

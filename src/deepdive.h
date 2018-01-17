@@ -51,12 +51,14 @@
 #define PREAMBLE_LENGTH       17
 
 #define MAX_NUM_LIGHTHOUSES   2
+#define MAX_NUM_TRACKERS      128
 #define MAX_NUM_SENSORS       32
 #define MAX_SERIAL_LENGTH     32
 #define USB_INT_BUFF_LENGTH   64
 
 #define USB_VEND_HTC          0x28de
 #define USB_PROD_TRACKER      0x2022
+#define USB_PROD_CONTROLLER   0x2012
 #define USB_PROD_WATCHMAN     0x2101
 
 #define USB_ENDPOINT_GENERAL  0x81
@@ -96,6 +98,7 @@ struct Calibration {
   float acc_scale[3];                       // Accelerometer scale
   float gyr_bias[3];                        // Gyro bias
   float gyr_scale[3];                       // Gyro scale
+  float imu_transform[7];                   // IMU transform (qx,qy,qz,qw),X,Y,Z
 };
 
 typedef struct {
@@ -224,7 +227,7 @@ typedef void (*general_func)(struct General * general);
 struct Driver {
   struct libusb_context* usb;
   uint16_t num_trackers;
-  struct Tracker **trackers;
+  struct Tracker *trackers[MAX_NUM_TRACKERS];
   lig_func lig_fn;               // Called when new light data arrives
   imu_func imu_fn;               // Called when new IMU data arrives
   but_func but_fn;               // Called when new button data arrives

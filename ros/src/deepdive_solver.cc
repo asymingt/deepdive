@@ -204,7 +204,6 @@ struct MotionCost {
   geometry_msgs::PoseWithCovariance measurement_;
 };
 
-
 // Send a corretc pose on the ROS messaging system
 void SendPose(ros::Publisher &pub, std::string const& serial,
   Pose pose, ros::Time epoch) {

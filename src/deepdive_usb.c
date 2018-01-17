@@ -172,6 +172,9 @@ static int json_parse(struct Tracker * tracker, const char* data) {
   if (json_object_object_get_ex(jobj, "gyro_scale", &jtmp))
     if (!json_read_arr_dbl(jtmp, tracker->cal.gyr_scale, 3))
       printf("Could not read the JSON field: gyr_scale\n");
+  if (json_object_object_get_ex(jobj, "trackref_from_imu", &jtmp))
+    if (!json_read_arr_dbl(jtmp, tracker->cal.imu_transform, 7))
+      printf("Could not read the JSON field: trackref_from_imu\n");
   // Photodiode calibration parameters
   json_object *jlhc;
   if (json_object_object_get_ex(jobj, "lighthouse_config", &jlhc)) {
@@ -227,14 +230,14 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
     }
     cfgbuffwide[0] = 0xff;
     ret = hid_get_feature_report_timeout(
-      tracker->udev, 0, cfgbuffwide, sizeof( cfgbuffwide ) );
+      tracker->udev, 0, cfgbuffwide, sizeof(cfgbuffwide));
     usleep(1000);
   }
   // Send Report 16 to prepare the device for reading config info
-  memset( cfgbuff, 0, sizeof( cfgbuff ) );
+  memset(cfgbuff, 0, sizeof(cfgbuff));
   cfgbuff[0] = 0x10;
   if((ret = hid_get_feature_report_timeout(
-    tracker->udev, 0, cfgbuff, sizeof( cfgbuff ) ) ) < 0 ) {
+    tracker->udev, 0, cfgbuff, sizeof(cfgbuff) ) ) < 0 ) {
     printf( "Could not get survive config data for device");
     return -1;
   }
@@ -272,13 +275,11 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
     printf( "Error: data for config descriptor is bad. (%d)", len);
     return -5;
   }
-  /*
   char fstname[128];
   sprintf(fstname, "%s.json.gz", tracker->serial);
   FILE *f = fopen( fstname, "wb" );
   fwrite(uncompressed_data, len, 1, f);
   fclose(f);
-  */
   // Parse the JSON data structure
   json_parse(tracker, uncompressed_data);
   return 0;
@@ -344,9 +345,10 @@ int deepdive_usb_init(struct Driver * drv) {
 
     // What we do depends on the product
     switch (tracker->type) {
-     /////////////////
-     // USB TRACKER //
-     /////////////////
+     ///////////////////////////////
+     // USB TRACKER OR CONTROLLER //
+     ///////////////////////////////
+     case USB_PROD_CONTROLLER:
      case USB_PROD_TRACKER:
       tracker->endpoints[0].tracker = tracker;
       tracker->endpoints[0].type = TRACKER_IMU;
@@ -410,10 +412,6 @@ int deepdive_usb_init(struct Driver * drv) {
       break;
     }
     // Add the tracker to the dynamic list of trackers
-    struct Tracker **old_trackers = drv->trackers;
-    drv->trackers = malloc(sizeof(struct Tracker*) * drv->num_trackers + 1);
-    for (size_t i = 0; i < drv->num_trackers; i++)
-      drv->trackers[i] = old_trackers[i];
     drv->trackers[drv->num_trackers++] = tracker;
     continue;
 

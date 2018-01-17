@@ -3,24 +3,15 @@
   <arg name="replay" default="" />
   <arg name="record" default="" />
   <!-- Data recorded, if needed -->
-  <node if="$(eval arg('record') != '')"
-        name="deepdive_player"
-        pkg="rosbag"
-        type="record"
-        args="-O $(arg record) -a'"/>
+  <node if="$(eval arg('record') != '')" name="deepdive_player"
+        pkg="rosbag" type="record" args="-O $(arg record) -a'"/>
   <!-- Bridge or bag replay, depending on arguments -->
-  <node unless="$(eval arg('replay') != '')"
-        name="deepdive_bridge"
-        pkg="deepdive_ros"
-        type="deepdive_bridge"/>
-  <node if="$(eval arg('replay') != '')"
-        name="deepdive_player"
-        pkg="rosbag"
-        type="play"
-        args="--clock --loop $(arg replay)"/>
-  <!-- Solver (one in total) -->
-  <node name="deepdive_solver"
-        pkg="deepdive_ros"
-        type="deepdive_solver"
-        args="-tf -skip"/>
+  <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
+        pkg="deepdive_ros" type="deepdive_bridge"/>
+  <node if="$(eval arg('replay') != '')" name="deepdive_player"
+        pkg="rosbag" type="play" args="--clock --loop $(arg replay)"/>
+  <!-- Each rigid cluster needs a solver -->
+  <node name="deepdive_solver" pkg="deepdive_ros" type="deepdive_solver">
+    <rosparam command="load" file="$(find deepdive_ros)/cfg/p4d.yaml" />
+  </node>
 </launch>
