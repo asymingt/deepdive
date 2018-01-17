@@ -1,0 +1,3 @@
+string serial                         # Lighthouse serial number
+---
+deepdive_ros/Lighthouse[] lighthouses     # Motor calibration info

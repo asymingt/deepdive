@@ -1,0 +1,3 @@
+string serial                         # Tracker serial number
+---
+deepdive_ros/Tracker[] trackers           # Motor calibration info
