@@ -33,6 +33,7 @@ extern "C" {
 #include <cmath>
 #include <map>
 #include <string>
+#include <limits>
 
 // Various constants used by the Vive system
 static constexpr double GRAVITY         = 9.80665;
@@ -40,14 +41,15 @@ static constexpr double GYRO_SCALE      = 32.768;
 static constexpr double ACC_SCALE       = 4096.0;
 static constexpr double SWEEP_DURATION  = 400000.0;
 static constexpr double SWEEP_CENTER    = 200000.0;
-static constexpr double TICKS_PER_SEC   = 48000000.0;
-static constexpr double COUNT_TO_TICKS  = 5000.0;
+static constexpr double TICKS_PER_SEC   = 48e6;
 
 // Data structures for storing lighthouses and trackers
 std::map<std::string, deepdive_ros::Lighthouse> lighthouses_;
 std::map<std::string, deepdive_ros::Tracker> trackers_;
  
 // Create data publishers
+ros::Publisher pub_lighthouse_;
+ros::Publisher pub_tracker_;
 ros::Publisher pub_light_;
 ros::Publisher pub_event_;
 ros::Publisher pub_imu_;
@@ -56,22 +58,31 @@ ros::ServiceServer srv_lighthouse_;
 
 // Convert time an return overflow count
 ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
-  // If we can't find the tracker we must initialize the tickstore and
-  // lastcount. The lastcount is used to track the counter to see if it
-  // has overflowed. The tickcount stores the number of ticks
+  // How many seconds in each overflow cycle of the counter
+  static uint32_t ticks_per_period = std::numeric_limits<uint32_t>::max();
+  // If we can't find the tracker we initialize its cycle counter
   if (trackers_.find(serial) == trackers_.end()) {
-    trackers_[serial].tickstore = 0;
     trackers_[serial].lastcount = 0;
+    trackers_[serial].overflows = 0;
   }
-  // Count the number of overflows to accumulate the correct number of ticks
-  if (trackers_[serial].lastcount > timecode)
-    trackers_[serial].tickstore += static_cast<double>(UINT32_MAX);
-  trackers_[serial].tickstore += timecode;
-  trackers_[serial].tickstore -= trackers_[serial].lastcount;
-  // Backup the timecode for use in next iteration
+  // In most cases we will be in the same cycle as the overflow. However,
+  // these two lines advance and pull back the overflow to take care of the
+  // fact that there is a bad time-ordering of packets
+  if (timecode > trackers_[serial].lastcount &&
+      timecode - trackers_[serial].lastcount > ticks_per_period / 2)
+      trackers_[serial].overflows--;
+  if (trackers_[serial].lastcount > timecode &&
+      trackers_[serial].lastcount - timecode > ticks_per_period / 2)
+      trackers_[serial].overflows++;
   trackers_[serial].lastcount = timecode;
-  // Add the tick store to the time code and covert to seconds
-  return ros::Time(trackers_[serial].tickstore / TICKS_PER_SEC * 1000.0);
+  // Calculate the time based on the number of overflows and the timecode
+  uint64_t tick = static_cast<uint64_t>(trackers_[serial].overflows)
+                * static_cast<uint64_t>(ticks_per_period)
+                + static_cast<uint64_t>(timecode);
+  int32_t secs = static_cast<int32_t>(tick / 48000000ULL);
+  int32_t nsec = static_cast<int32_t>((tick % 48000000ULL) * 1000 / 48);
+  // Add the tick store to the time code and convert to seconds
+  return ros::Time(secs, nsec);
 }
 
 // Callback to display light info
@@ -90,7 +101,7 @@ void LightCallback(struct Tracker * tracker,
     msg.pulses[i].angle = (M_PI / SWEEP_DURATION)
       * (static_cast<double>(angles[i]) - SWEEP_CENTER);
     msg.pulses[i].duration =
-      static_cast<double>(lengths[i]) / TICKS_PER_SEC * 1000000.0;
+      static_cast<double>(lengths[i]) / TICKS_PER_SEC;
   }
   // Publish the data
   pub_light_.publish(msg);
@@ -168,6 +179,8 @@ void TrackerCallback(struct Tracker * t) {
   msg.imu_transform.translation.x = t->cal.imu_transform[4];
   msg.imu_transform.translation.y = t->cal.imu_transform[5];
   msg.imu_transform.translation.z = t->cal.imu_transform[6];
+  //  Publish the tracker info
+  pub_tracker_.publish(msg);
 }
 
 // Configuration call from the vive_tool
@@ -187,6 +200,8 @@ void LighthouseCallback(struct Lighthouse *l) {
   msg.acceleration.x = l->accel[0];
   msg.acceleration.y = l->accel[1];
   msg.acceleration.z = l->accel[2];
+  // Publish the lighthouse info
+  pub_lighthouse_.publish(msg);
 }
 
 // Get a single or list of lighthouses 
@@ -224,6 +239,8 @@ int main(int argc, char **argv) {
   ros::NodeHandle nh;
 
   // Create data publishers
+  pub_lighthouse_ = nh.advertise<deepdive_ros::Lighthouse>("lighthouse", 10);
+  pub_tracker_ = nh.advertise<deepdive_ros::Tracker>("tracker", 10);
   pub_light_ = nh.advertise<deepdive_ros::Light>("light", 10);
   pub_event_ = nh.advertise<deepdive_ros::Event>("event", 10);
   pub_imu_ = nh.advertise<sensor_msgs::Imu>("imu", 10);
