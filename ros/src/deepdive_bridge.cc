@@ -63,7 +63,7 @@ ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
   // If we can't find the tracker we initialize its cycle counter
   if (trackers_.find(serial) == trackers_.end()) {
     trackers_[serial].lastcount = 0;
-    trackers_[serial].overflows = 0;
+    trackers_[serial].overflows = 1;
   }
   // In most cases we will be in the same cycle as the overflow. However,
   // these two lines advance and pull back the overflow to take care of the
@@ -239,8 +239,8 @@ int main(int argc, char **argv) {
   ros::NodeHandle nh;
 
   // Create data publishers
-  pub_lighthouse_ = nh.advertise<deepdive_ros::Lighthouse>("lighthouse", 10);
-  pub_tracker_ = nh.advertise<deepdive_ros::Tracker>("tracker", 10);
+  pub_lighthouse_ = nh.advertise<deepdive_ros::Lighthouse>("lighthouse", 10, true);
+  pub_tracker_ = nh.advertise<deepdive_ros::Tracker>("tracker", 10, true);
   pub_light_ = nh.advertise<deepdive_ros::Light>("light", 10);
   pub_event_ = nh.advertise<deepdive_ros::Event>("event", 10);
   pub_imu_ = nh.advertise<sensor_msgs::Imu>("imu", 10);
