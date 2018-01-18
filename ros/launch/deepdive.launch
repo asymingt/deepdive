@@ -3,6 +3,7 @@
   <arg name="target" default="" />
   <arg name="replay" default="" />
   <arg name="record" default="" />
+  <arg name="rviz" default="true" />
   <!-- Data recorded, if needed -->
   <node if="$(eval arg('record') != '')" name="deepdive_recorder"
         pkg="rosbag" type="record" args="-O $(arg record) -a"/>
@@ -12,8 +13,12 @@
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
         pkg="deepdive_ros" type="deepdive_bridge"/>
   <!-- Each rigid cluster needs a solver -->
-  <node if="$(eval arg('target') != '')"
-    name="deepdive_solver" pkg="deepdive_ros" type="deepdive_solver">
+  <node if="$(eval arg('target') != '')" name="deepdive_solver"
+        pkg="deepdive_ros" type="deepdive_solver" output="screen">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/$(arg target).yaml" />
   </node>
+  <!-- Visualization -->
+  <node if="$(arg rviz)" name="deepdive_rviz"
+        pkg="rviz" type="rviz"  respawn="true"
+        args="-d $(find deepdive_ros)/cfg/gui.rviz"/>
 </launch>

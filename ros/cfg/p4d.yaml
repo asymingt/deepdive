@@ -1,4 +1,51 @@
-topic: "/loc/truth"
-devices:
+# Send pose, twist and accel estimates on these topics
+topics:
+  pose:  "/loc/pose"
+  twist: "/loc/twist"
+  accel: "/loc/accel"
+
+# Send pose estimates using this TF2 frame name
+frame: "truth"
+
+# The trackers are RIGID with respect to each other
+# and the body frame being tracked. Their positions
+# are not known, and are solved for at runtime.
+trackers:
   - "LHR-08DDBC05"
   - "LHR-08DE340B"
+
+# The Vive system supports up to two lighthouses, which
+# must be listed below.
+lighthouses:
+  - "668207140"
+  - "2935772913"
+
+# The initial pose and gravity, all in the body frame.
+# We assume that twist is zero on initialization.
+intial_position: [0 0 0]
+intial_attitude: [0 0 0 1]
+gravity: [0 0 9.80665]
+
+# By default we solve for the pose of the body frame
+# as a function of time, as well as the lighthouse
+# positions. We can also simulatenously refine the
+# sensor extrinsics, and lighthouse calibration.
+refine:
+  extrinsics: false
+  calibration: false
+
+# These are the covariances in all of our measurements,
+# some of which are used by the filter, while others
+# are used by the solver.
+covariances:
+  accel_: [0 0 0]
+  accel_bias: [0 0 0]
+  gyroscope: [0 0 0]
+  gyroscope_bias: [0 0 0]
+  light_angle: 1e-6
+  light_distance: 1e-6
+
+# Various optimizer options
+solver:
+  iterations: 100
+  tolerance: 1e-6
