@@ -18,9 +18,7 @@
     <rosparam command="load" file="$(find deepdive_ros)/cfg/$(arg target).yaml" />
   </node>
   <!-- Visualization -->
-  <!--
   <node if="$(arg rviz)" name="deepdive_rviz"
         pkg="rviz" type="rviz"  respawn="true"
         args="-d $(find deepdive_ros)/cfg/gui.rviz"/>
-  -->
 </launch>

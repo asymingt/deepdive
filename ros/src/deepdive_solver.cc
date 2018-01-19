@@ -18,6 +18,9 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 
+// For rviz
+#include <nav_msgs/Path.h>
+
 // Non-standard datra messages
 #include <deepdive_ros/Light.h>
 
@@ -66,8 +69,6 @@
 
 #define MAX_NUM_SENSORS      22
 #define VIVE_FOV_RADS        1.39626
-#define WEIGHT_MOTION        1.0
-#define WEIGHT_LIGHT         1000.0
 
 // Calibration parameter
 enum {
@@ -176,19 +177,19 @@ struct LightCost {
       ApplyTransform(Tl_t, &extrinsics[6*s+3], Sn);
       // Get the horizontal / vertical angles between the sensor and lighthouse
       // This might cause numerical instability
-      ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan2(Sx[0], Sx[2]);
-      ax[deepdive_ros::Motor::AXIS_VERTICAL]= atan2(Sx[1], Sx[2]);
+      ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan(Sx[0] / Sx[2]);
+      ax[deepdive_ros::Motor::AXIS_VERTICAL]= atan(Sx[1] / Sx[2]);
       // Apply the error correction as needed. I am going to assume that the
       // engineers kept this equation as simple as possible, and infer the
       // meaning of the calibration parameters based on their name. It might
       // be the case that these value are subtracted, rather than added. 
-      ax[a] -= T(calibration[CAL_PHASE]);
-      ax[a] -= T(calibration[CAL_TILT]) * ax[1-a];
-      ax[a] -= T(calibration[CAL_CURVE]) * ax[1-a] * ax[1-a];
-      ax[a] -= T(calibration[CAL_GIB_MAG]) * cos(ax[1-a] + T(calibration[CAL_GIB_PHASE]));
+      // ax[a] += T(calibration[CAL_PHASE]);
+      // ax[a] += T(calibration[CAL_TILT]) * ax[1-a];
+      // ax[a] += T(calibration[CAL_CURVE]) * ax[1-a] * ax[1-a];
+      // ax[a] += T(calibration[CAL_GIB_MAG]) * cos(ax[1-a] + T(calibration[CAL_GIB_PHASE]));
       // The residual is the axis of interest minus the predicted value as
       // given by the light measurements
-      residual[i] = T(WEIGHT_LIGHT) * (ax[a] - T(measurement_.pulses[i].angle));
+      residual[i] = ax[a] - T(measurement_.pulses[i].angle);
     }
     // Everything went well
     return true;
@@ -207,7 +208,7 @@ struct MotionCost {
                   T* residual) const {
     // Try and force the two poses close to each other
     for (size_t i = 0; i < 6; i++)
-      residual[i] = T(WEIGHT_MOTION) * (Tb_w_i[i] - Tb_w_j[i]);
+      residual[i] = Tb_w_i[i] - Tb_w_j[i];
     return true;
   }
 };
@@ -256,6 +257,9 @@ void Print(double t[6]) {
            " z: "  << t[2]);
 }
 
+// Publisher for the nav_msgs::Path
+ros::Publisher pub_trajectory_;
+
 // Just keep solving in the background
 void WorkerThread() {
   // Allocate datato solve the problem
@@ -280,7 +284,7 @@ void WorkerThread() {
     while (lighthouses_.size()) {
       deepdive_ros::Lighthouse & lighthouse = lighthouses_.front();
       std::string & serial = lighthouse.serial;
-      ROS_INFO_STREAM("Adding lighthouse with serial " << serial);
+      // ROS_INFO_STREAM("Adding lighthouse with serial " << serial);
       // If the tracker does not exist, a
       if (lighthouses.find(serial) == lighthouses.end())
         IntializeRandomly(lighthouses[serial].Tl_w);
@@ -303,7 +307,7 @@ void WorkerThread() {
     while (trackers_.size()) {
       deepdive_ros::Tracker & tracker = trackers_.front();
       std::string & serial = tracker.serial;
-      ROS_INFO_STREAM("Adding tracker with serial " << serial);
+      // ROS_INFO_STREAM("Adding tracker with serial " << serial);
       // If the tracker does not exist, a
       if (trackers.find(serial) == trackers.end())
         IntializeRandomly(trackers[serial].Tt_b);
@@ -314,11 +318,6 @@ void WorkerThread() {
         trackers[serial].extrinsics[6*i+3] = tracker.sensors[i].normal.x;
         trackers[serial].extrinsics[6*i+4] = tracker.sensors[i].normal.y;
         trackers[serial].extrinsics[6*i+5] = tracker.sensors[i].normal.z;
-        ROS_INFO_STREAM("- LED " << i);
-        ROS_INFO_STREAM("- X " << trackers[serial].extrinsics[6*i+0]);
-        ROS_INFO_STREAM("- Y " << trackers[serial].extrinsics[6*i+1]);
-        ROS_INFO_STREAM("- Z " << trackers[serial].extrinsics[6*i+2]);
-
       }
       trackers_.pop();
     }
@@ -326,7 +325,7 @@ void WorkerThread() {
     // Iterate over all light measurements, adding a reisdual block for each
     // bundle, which uses the predicted lighthouse and tracker poses to predict
     // the angles to the lighthouses.
-    ROS_INFO_STREAM("Adding " << light_.size() << " light measurements");
+    // ROS_INFO_STREAM("Adding " << light_.size() << " light measurements");
     while (light_.size()) {
       // If we haven't yet received tracker data, then don't add these
       // measurements, as the extrinsics aren't yet initialized.
@@ -375,7 +374,7 @@ void WorkerThread() {
     }
 
     // Iterate over all pose measurements, adding a residual block for each
-    ROS_INFO_STREAM("Adding " << corrections_.size() << " pose corrrections");
+    // ROS_INFO_STREAM("Adding " << corrections_.size() << " pose corrrections");
     while (corrections_.size()) {
       // Find the closest "earliest" pose to the correction
       Trajectory::iterator prev = trajectory.lower_bound(
@@ -401,19 +400,51 @@ void WorkerThread() {
 
     // If we actually have some data, then use it
     if (trajectory.size()) {
-      // Solve the problem 
+      // If we haven't pinned down the segment with at least one constraint,
+      // then we'll need to set the initial pose to zero.
+      if (unsolvable) {
+        trajectory.begin()->second.Tb_w[0] = 0;
+        trajectory.begin()->second.Tb_w[1] = 0;
+        trajectory.begin()->second.Tb_w[2] = 0;
+        trajectory.begin()->second.Tb_w[3] = 0;
+        trajectory.begin()->second.Tb_w[4] = 0;
+        trajectory.begin()->second.Tb_w[5] = 0;
+        problem.SetParameterBlockConstant(
+          reinterpret_cast<double*>(trajectory.begin()->second.Tb_w));
+      } else {
+        problem.SetParameterBlockVariable(
+          reinterpret_cast<double*>(trajectory.begin()->second.Tb_w));
+      }
+      // Define the ceres problem
       ceres::Solver::Options options;
-      options.num_threads = 16;
-      options.num_linear_solver_threads = 16;
-      options.minimizer_progress_to_stdout = true;
+      options.num_threads = 8;
+      options.num_linear_solver_threads = 8;
+      options.minimizer_progress_to_stdout = false;
       options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
       ceres::Solver::Summary summary;
+      // Solve the problem
       ceres::Solve(options, &problem, &summary);
-      std::cout << summary.FullReport() << std::endl;
-      // Print out the solved trajectory
-      // Trajectory::iterator it;
-      for (Trajectory::iterator it = trajectory.begin(); it != trajectory.end(); it++)
-        Print(it->second.Tb_w);
+      // Print the trajectory
+      nav_msgs::Path msg;
+      msg.header.stamp = ros::Time::now();
+      msg.header.frame_id = "world";
+      Trajectory:: iterator it;
+      for (it = trajectory.begin(); it != trajectory.end(); it++) {
+        static geometry_msgs::PoseStamped ps;
+        static double q[4];
+        ceres::AngleAxisToQuaternion(&it->second.Tb_w[3], q);
+        ps.header.stamp = it->first;
+        ps.header.frame_id = "world";
+        ps.pose.position.x = it->second.Tb_w[0];
+        ps.pose.position.y = it->second.Tb_w[1];
+        ps.pose.position.z = it->second.Tb_w[2];
+        ps.pose.orientation.w = q[0];
+        ps.pose.orientation.x = q[1];
+        ps.pose.orientation.y = q[2];
+        ps.pose.orientation.z = q[3];
+        msg.poses.push_back(ps);
+      }
+      pub_trajectory_.publish(msg);
     }
 
     // Sleep for a little
@@ -466,6 +497,9 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get device list.");
   if (!nh.getParam("trackers", permitted_trackers_))
     ROS_FATAL("Failed to get device list.");
+
+  // Publish the trajectory
+  pub_trajectory_ = nh.advertise<nav_msgs::Path>("/path", 10);
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  =
