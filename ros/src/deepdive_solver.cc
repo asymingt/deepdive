@@ -403,6 +403,8 @@ void WorkerThread() {
     if (trajectory.size()) {
       // Solve the problem 
       ceres::Solver::Options options;
+      options.num_threads = 16;
+      options.num_linear_solver_threads = 16;
       options.minimizer_progress_to_stdout = true;
       options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
       ceres::Solver::Summary summary;
