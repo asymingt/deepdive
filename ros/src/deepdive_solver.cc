@@ -66,6 +66,8 @@
 
 #define MAX_NUM_SENSORS      22
 #define VIVE_FOV_RADS        1.39626
+#define WEIGHT_MOTION        1.0
+#define WEIGHT_LIGHT         1000.0
 
 // Calibration parameter
 enum {
@@ -173,19 +175,20 @@ struct LightCost {
       ApplyTransform(Tl_t, &extrinsics[6*s+0], Sx);
       ApplyTransform(Tl_t, &extrinsics[6*s+3], Sn);
       // Get the horizontal / vertical angles between the sensor and lighthouse
-      ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan(Sx[0]/Sx[2]);
-      ax[deepdive_ros::Motor::AXIS_VERTICAL]= atan(Sx[1]/Sx[2]);
+      // This might cause numerical instability
+      ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan2(Sx[0], Sx[2]);
+      ax[deepdive_ros::Motor::AXIS_VERTICAL]= atan2(Sx[1], Sx[2]);
       // Apply the error correction as needed. I am going to assume that the
       // engineers kept this equation as simple as possible, and infer the
       // meaning of the calibration parameters based on their name. It might
       // be the case that these value are subtracted, rather than added. 
-      // ax[a] += T(calibration[CAL_PHASE]);
-      // ax[a] += T(calibration[CAL_TILT]) * ax[1-a];
-      // ax[a] += T(calibration[CAL_CURVE]) * ax[1-a] * ax[1-a];
-      // ax[a] += T(calibration[CAL_GIB_MAG]) * cos(ax[1-a] + T(calibration[CAL_GIB_PHASE]));
+      ax[a] -= T(calibration[CAL_PHASE]);
+      ax[a] -= T(calibration[CAL_TILT]) * ax[1-a];
+      ax[a] -= T(calibration[CAL_CURVE]) * ax[1-a] * ax[1-a];
+      ax[a] -= T(calibration[CAL_GIB_MAG]) * cos(ax[1-a] + T(calibration[CAL_GIB_PHASE]));
       // The residual is the axis of interest minus the predicted value as
       // given by the light measurements
-      residual[i] = ax[a] - T(measurement_.pulses[i].angle);
+      residual[i] = T(WEIGHT_LIGHT) * (ax[a] - T(measurement_.pulses[i].angle));
     }
     // Everything went well
     return true;
@@ -204,8 +207,7 @@ struct MotionCost {
                   T* residual) const {
     // Try and force the two poses close to each other
     for (size_t i = 0; i < 6; i++)
-      residual[i] = Tb_w_i[i] - Tb_w_j[i];
-    // Everything went well
+      residual[i] = T(WEIGHT_MOTION) * (Tb_w_i[i] - Tb_w_j[i]);
     return true;
   }
 };
@@ -243,7 +245,7 @@ struct CorrectionCost {
 // Random initialization of pose
 void IntializeRandomly(double t[6]) {
   for (size_t i = 0; i < 6; i++)
-    t[i] = 1.0;
+    t[i] = 0;
 }
 
 // Random initialization of pose
@@ -306,13 +308,17 @@ void WorkerThread() {
       if (trackers.find(serial) == trackers.end())
         IntializeRandomly(trackers[serial].Tt_b);
       for (size_t i = 0; i < tracker.sensors.size(); i++) {
-        ROS_INFO_STREAM("- LED " << i);
         trackers[serial].extrinsics[6*i+0] = tracker.sensors[i].position.x;
         trackers[serial].extrinsics[6*i+1] = tracker.sensors[i].position.y;
         trackers[serial].extrinsics[6*i+2] = tracker.sensors[i].position.z;
         trackers[serial].extrinsics[6*i+3] = tracker.sensors[i].normal.x;
         trackers[serial].extrinsics[6*i+4] = tracker.sensors[i].normal.y;
         trackers[serial].extrinsics[6*i+5] = tracker.sensors[i].normal.z;
+        ROS_INFO_STREAM("- LED " << i);
+        ROS_INFO_STREAM("- X " << trackers[serial].extrinsics[6*i+0]);
+        ROS_INFO_STREAM("- Y " << trackers[serial].extrinsics[6*i+1]);
+        ROS_INFO_STREAM("- Z " << trackers[serial].extrinsics[6*i+2]);
+
       }
       trackers_.pop();
     }
@@ -322,42 +328,47 @@ void WorkerThread() {
     // the angles to the lighthouses.
     ROS_INFO_STREAM("Adding " << light_.size() << " light measurements");
     while (light_.size()) {
-      // Find the closest "earliest" pose to the correction
-      Trajectory::iterator prev = trajectory.lower_bound(
-        corrections_.front().header.stamp);
-      // Get the critical information about this measurement
-      Lighthouse & lighthouse = lighthouses[light_.front().lighthouse];
-      Tracker & tracker = trackers[light_.front().header.frame_id];
-      Pose & pose = trajectory[light_.front().header.stamp];
-      // Initialize the pose to a random number
-      IntializeRandomly(pose.Tb_w);
-      // Add a cost function
-      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-        <LightCost, ceres::DYNAMIC, 6, 6, 6, SIZE_CAL, MAX_NUM_SENSORS * 6>(
-          new LightCost(light_.front()), light_.front().pulses.size());
-      // Get the axis of this measurement
-      size_t a = static_cast<size_t>(light_.front().axis);
-      // Create a residual block that relates the correct parameters
-      problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-        reinterpret_cast<double*>(lighthouse.Tl_w),
-        reinterpret_cast<double*>(pose.Tb_w),
-        reinterpret_cast<double*>(tracker.Tt_b),
-        reinterpret_cast<double*>(lighthouse.calibration[a]),
-        reinterpret_cast<double*>(tracker.extrinsics));
-      // Optional: set the extrinsics and calibration to contants
-      problem.SetParameterBlockConstant(
-        reinterpret_cast<double*>(lighthouse.calibration[a]));
-      problem.SetParameterBlockConstant(
-        reinterpret_cast<double*>(tracker.extrinsics));
-      // Link this pose to a previous pose using a motion cost
-      if (prev != trajectory.end()) {
+      // If we haven't yet received tracker data, then don't add these
+      // measurements, as the extrinsics aren't yet initialized.
+      Trackers::iterator curr = trackers.find(light_.front().header.frame_id);
+      if (curr != trackers.end()) {
+        // Find the closest "earliest" pose to the correction
+        Trajectory::iterator prev = trajectory.lower_bound(
+          corrections_.front().header.stamp);
+        // Create a pose for this light measurement, if needed
+        Pose & pose = trajectory[light_.front().header.stamp];
+        // Get the critical information about this measurement
+        Lighthouse & lighthouse = lighthouses[light_.front().lighthouse];
+        // Initialize the pose to a random number
+        IntializeRandomly(pose.Tb_w);
         // Add a cost function
         ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-          <MotionCost, 6, 6, 6>(new MotionCost());
+          <LightCost, ceres::DYNAMIC, 6, 6, 6, SIZE_CAL, MAX_NUM_SENSORS * 6>(
+            new LightCost(light_.front()), light_.front().pulses.size());
+        // Get the axis of this measurement
+        size_t a = static_cast<size_t>(light_.front().axis);
         // Create a residual block that relates the correct parameters
         problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-          reinterpret_cast<double*>(prev->second.Tb_w),
-          reinterpret_cast<double*>(pose.Tb_w));
+          reinterpret_cast<double*>(lighthouse.Tl_w),
+          reinterpret_cast<double*>(pose.Tb_w),
+          reinterpret_cast<double*>(curr->second.Tt_b),
+          reinterpret_cast<double*>(lighthouse.calibration[a]),
+          reinterpret_cast<double*>(curr->second.extrinsics));
+        // Optional: set the extrinsics and calibration to contants
+        problem.SetParameterBlockConstant(
+          reinterpret_cast<double*>(lighthouse.calibration[a]));
+        problem.SetParameterBlockConstant(
+          reinterpret_cast<double*>(curr->second.extrinsics));
+        // Link this pose to a previous pose using a motion cost
+        if (prev != trajectory.end()) {
+          // Add a cost function
+          ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+            <MotionCost, 6, 6, 6>(new MotionCost());
+          // Create a residual block that relates the correct parameters
+          problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+            reinterpret_cast<double*>(prev->second.Tb_w),
+            reinterpret_cast<double*>(pose.Tb_w));
+        }
       }
       // Remove the measurment
       light_.pop();
@@ -390,31 +401,17 @@ void WorkerThread() {
 
     // If we actually have some data, then use it
     if (trajectory.size()) {
-      // If we haven't reaceived any corrections, pin down the first segment
-      if (unsolvable) {
-        trajectory.begin()->second.Tb_w[0] = 0;
-        trajectory.begin()->second.Tb_w[1] = 0;
-        trajectory.begin()->second.Tb_w[2] = 0;
-        trajectory.begin()->second.Tb_w[3] = 0;
-        trajectory.begin()->second.Tb_w[4] = 0;
-        trajectory.begin()->second.Tb_w[5] = 0;
-        problem.SetParameterBlockConstant(
-          reinterpret_cast<double*>(trajectory.begin()->second.Tb_w));
-      } else {
-        problem.SetParameterBlockVariable(
-          reinterpret_cast<double*>(trajectory.begin()->second.Tb_w));
-      }
       // Solve the problem 
       ceres::Solver::Options options;
       options.minimizer_progress_to_stdout = true;
-      options.linear_solver_type = ceres::DENSE_QR;
+      options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
       ceres::Solver::Summary summary;
       ceres::Solve(options, &problem, &summary);
       std::cout << summary.FullReport() << std::endl;
       // Print out the solved trajectory
       // Trajectory::iterator it;
-      // for (it = trajectory.begin(); it != trajectory.end(); it++)
-      //   Print(it->second.Tb_w);
+      for (Trajectory::iterator it = trajectory.begin(); it != trajectory.end(); it++)
+        Print(it->second.Tb_w);
     }
 
     // Sleep for a little
