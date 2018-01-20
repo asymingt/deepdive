@@ -17,6 +17,7 @@
 // Standard messages
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseArray.h>
 
 // For rviz
 #include <nav_msgs/Path.h>
@@ -45,11 +46,11 @@
 // We have the following relationship:
 //
 //                                            <motion>       [calibration]
-//                                                |               |
-//                                                |                ''
-//    Sensor 1...N ---(Ti)---> Tracker 1...M ---(Tj)---> Body ---(Tk)--> World
-//          |                                                              ^
-//          +------[measurements]------> Lighthouse ------(Tl)-------------|
+//                                               |                 |
+//                                               '                 '
+//  Sensor 1-N -- (extrincs) -- Tracker 1-M -- (Tt_b) -- Body -- (Tb_w) -- World
+//          |                                                              |
+//          '-----[angles,duration]------ Lighthouse 1-L ------(Tl_w)------'
 //
 // Where
 //    Ti = CONSTANT tracker -> sensor transforms
@@ -68,7 +69,8 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #define MAX_NUM_SENSORS      22
-#define VIVE_FOV_RADS        1.39626
+#define SIGMA_ANGLE          0.001
+#define SIGMA_MOTION         1.0
 
 // Calibration parameter
 enum {
@@ -123,7 +125,7 @@ void CombineTransforms(const T ti[6], const T tj[6], T tji[6]) {
   static T qi[4], qj[4], qji[4];
   ceres::AngleAxisToQuaternion(&ti[3], qi);
   ceres::AngleAxisToQuaternion(&tj[3], qj);
-  ceres::QuaternionProduct(qj, qi, qji);
+  ceres::QuaternionProduct(qi, qj, qji);
   ceres::QuaternionToAngleAxis(qji, &tji[3]);
   for (size_t i = 0; i < 3; i++)
     tji[i] = ti[i] + tj[i];
@@ -159,10 +161,10 @@ struct LightCost {
                   const T* const extrinsics,    // Tracker extrinsics
                   T* residual) const {
     // Get the transform that moves the sensor from the tracker to
-    static T Tw_t[6], Tw_b[6], Tb_t[6], Tl_t[6], Sx[3], Sn[3], ax[SIZE_AXIS];
-    static size_t a, s;
+    static T Tw_t[6], Tw_b[6], Tb_t[6], Tl_t[6], Sx[3], Sn[3], ax[2];
+    static uint16_t a, s;
     // Get the axis of this measurement
-    a = static_cast<size_t>(measurement_.axis);
+    a = static_cast<uint16_t>(measurement_.axis);
     // Get the transform that moves the tracker to the world frame
     InvertTransform(Tb_w, Tw_b);
     InvertTransform(Tt_b, Tb_t);
@@ -172,13 +174,29 @@ struct LightCost {
       // Get the transform that moves the tracker to the world frame
       CombineTransforms(Tl_w, Tw_t, Tl_t);
       // Get the sensor position in the lighthouse frame
-      s = static_cast<size_t>(measurement_.pulses[i].sensor);
+      s = static_cast<uint16_t>(measurement_.pulses[i].sensor);
+      if (s >= MAX_NUM_SENSORS) {
+        ROS_WARN("Sensor ID error");
+        return false;
+      }
       ApplyTransform(Tl_t, &extrinsics[6*s+0], Sx);
       ApplyTransform(Tl_t, &extrinsics[6*s+3], Sn);
       // Get the horizontal / vertical angles between the sensor and lighthouse
       // This might cause numerical instability
-      ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan(Sx[0] / Sx[2]);
-      ax[deepdive_ros::Motor::AXIS_VERTICAL]= atan(Sx[1] / Sx[2]);
+      switch (a) {
+      case deepdive_ros::Motor::AXIS_HORIZONTAL:
+        residual[i] = atan(Sx[1] / Sx[2]) + T(measurement_.pulses[i].angle);
+        break;
+      case deepdive_ros::Motor::AXIS_VERTICAL:
+        residual[i] = atan(Sx[0] / Sx[2]) - T(measurement_.pulses[i].angle);
+        break;
+      default:
+        ROS_WARN("Axis ID error");
+        return false;
+      }
+      residual[i] /= T(SIGMA_ANGLE);
+      // ax[deepdive_ros::Motor::AXIS_HORIZONTAL] = -atan(Sx[1] / Sx[2]);
+      // ax[deepdive_ros::Motor::AXIS_VERTICAL] = atan(Sx[0] / Sx[2]);
       // Apply the error correction as needed. I am going to assume that the
       // engineers kept this equation as simple as possible, and infer the
       // meaning of the calibration parameters based on their name. It might
@@ -189,7 +207,7 @@ struct LightCost {
       // ax[a] += T(calibration[CAL_GIB_MAG]) * cos(ax[1-a] + T(calibration[CAL_GIB_PHASE]));
       // The residual is the axis of interest minus the predicted value as
       // given by the light measurements
-      residual[i] = ax[a] - T(measurement_.pulses[i].angle);
+      // residual[i] = ax[a] - T(measurement_.pulses[i].angle);
     }
     // Everything went well
     return true;
@@ -208,7 +226,7 @@ struct MotionCost {
                   T* residual) const {
     // Try and force the two poses close to each other
     for (size_t i = 0; i < 6; i++)
-      residual[i] = Tb_w_i[i] - Tb_w_j[i];
+      residual[i] = (Tb_w_i[i] - Tb_w_j[i]) / T(SIGMA_MOTION);
     return true;
   }
 };
@@ -244,12 +262,6 @@ struct CorrectionCost {
 };
 
 // Random initialization of pose
-void IntializeRandomly(double t[6]) {
-  for (size_t i = 0; i < 6; i++)
-    t[i] = 0;
-}
-
-// Random initialization of pose
 void Print(double t[6]) {
   ROS_INFO_STREAM("[POS]" <<
            " x: "  << t[0] <<
@@ -259,6 +271,7 @@ void Print(double t[6]) {
 
 // Publisher for the nav_msgs::Path
 ros::Publisher pub_trajectory_;
+ros::Publisher pub_stations_;
 
 // Just keep solving in the background
 void WorkerThread() {
@@ -285,9 +298,6 @@ void WorkerThread() {
       deepdive_ros::Lighthouse & lighthouse = lighthouses_.front();
       std::string & serial = lighthouse.serial;
       // ROS_INFO_STREAM("Adding lighthouse with serial " << serial);
-      // If the tracker does not exist, a
-      if (lighthouses.find(serial) == lighthouses.end())
-        IntializeRandomly(lighthouses[serial].Tl_w);
       for (size_t i = 0; i < 2; i++) {
         lighthouses[serial].calibration[i][CAL_PHASE]
           = lighthouse.motors[i].phase;
@@ -308,9 +318,6 @@ void WorkerThread() {
       deepdive_ros::Tracker & tracker = trackers_.front();
       std::string & serial = tracker.serial;
       // ROS_INFO_STREAM("Adding tracker with serial " << serial);
-      // If the tracker does not exist, a
-      if (trackers.find(serial) == trackers.end())
-        IntializeRandomly(trackers[serial].Tt_b);
       for (size_t i = 0; i < tracker.sensors.size(); i++) {
         trackers[serial].extrinsics[6*i+0] = tracker.sensors[i].position.x;
         trackers[serial].extrinsics[6*i+1] = tracker.sensors[i].position.y;
@@ -338,8 +345,6 @@ void WorkerThread() {
         Pose & pose = trajectory[light_.front().header.stamp];
         // Get the critical information about this measurement
         Lighthouse & lighthouse = lighthouses[light_.front().lighthouse];
-        // Initialize the pose to a random number
-        IntializeRandomly(pose.Tb_w);
         // Add a cost function
         ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
           <LightCost, ceres::DYNAMIC, 6, 6, 6, SIZE_CAL, MAX_NUM_SENSORS * 6>(
@@ -354,6 +359,8 @@ void WorkerThread() {
           reinterpret_cast<double*>(lighthouse.calibration[a]),
           reinterpret_cast<double*>(curr->second.extrinsics));
         // Optional: set the extrinsics and calibration to contants
+        problem.SetParameterBlockConstant(
+          reinterpret_cast<double*>(curr->second.Tt_b));
         problem.SetParameterBlockConstant(
           reinterpret_cast<double*>(lighthouse.calibration[a]));
         problem.SetParameterBlockConstant(
@@ -417,34 +424,57 @@ void WorkerThread() {
       }
       // Define the ceres problem
       ceres::Solver::Options options;
-      options.num_threads = 8;
-      options.num_linear_solver_threads = 8;
+      options.num_threads = 16;
+      options.num_linear_solver_threads = 16;
       options.minimizer_progress_to_stdout = false;
       options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
       ceres::Solver::Summary summary;
       // Solve the problem
       ceres::Solve(options, &problem, &summary);
       // Print the trajectory
-      nav_msgs::Path msg;
-      msg.header.stamp = ros::Time::now();
-      msg.header.frame_id = "world";
-      Trajectory:: iterator it;
-      for (it = trajectory.begin(); it != trajectory.end(); it++) {
-        static geometry_msgs::PoseStamped ps;
-        static double q[4];
-        ceres::AngleAxisToQuaternion(&it->second.Tb_w[3], q);
-        ps.header.stamp = it->first;
-        ps.header.frame_id = "world";
-        ps.pose.position.x = it->second.Tb_w[0];
-        ps.pose.position.y = it->second.Tb_w[1];
-        ps.pose.position.z = it->second.Tb_w[2];
-        ps.pose.orientation.w = q[0];
-        ps.pose.orientation.x = q[1];
-        ps.pose.orientation.y = q[2];
-        ps.pose.orientation.z = q[3];
-        msg.poses.push_back(ps);
+      {
+        nav_msgs::Path msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = "world";
+        Trajectory::iterator it;
+        for (it = trajectory.begin(); it != trajectory.end(); it++) {
+          static geometry_msgs::PoseStamped ps;
+          static double q[4];
+          ceres::AngleAxisToQuaternion(&it->second.Tb_w[3], q);
+          ps.header.stamp = it->first;
+          ps.header.frame_id = "world";
+          ps.pose.position.x = it->second.Tb_w[0];
+          ps.pose.position.y = it->second.Tb_w[1];
+          ps.pose.position.z = it->second.Tb_w[2];
+          ps.pose.orientation.w = q[0];
+          ps.pose.orientation.x = q[1];
+          ps.pose.orientation.y = q[2];
+          ps.pose.orientation.z = q[3];
+          msg.poses.push_back(ps);
+        }
+        pub_trajectory_.publish(msg);
       }
-      pub_trajectory_.publish(msg);
+      // Print the base stations
+      {
+        geometry_msgs::PoseArray msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = "world";
+        Lighthouses::iterator it;
+        for (it = lighthouses.begin(); it != lighthouses.end(); it++) {
+          static geometry_msgs::Pose pose;
+          static double q[4];
+          ceres::AngleAxisToQuaternion(&it->second.Tl_w[3], q);
+          pose.position.x = it->second.Tl_w[0];
+          pose.position.y = it->second.Tl_w[1];
+          pose.position.z = it->second.Tl_w[2];
+          pose.orientation.w = q[0];
+          pose.orientation.x = q[1];
+          pose.orientation.y = q[2];
+          pose.orientation.z = q[3];
+          msg.poses.push_back(pose);
+        }
+        pub_stations_.publish(msg);
+      }
     }
 
     // Sleep for a little
@@ -500,6 +530,7 @@ int main(int argc, char **argv) {
 
   // Publish the trajectory
   pub_trajectory_ = nh.advertise<nav_msgs::Path>("/path", 10);
+  pub_stations_ = nh.advertise<geometry_msgs::PoseArray>("/stations", 10);
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  =

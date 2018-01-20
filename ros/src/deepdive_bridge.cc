@@ -21,8 +21,8 @@ extern "C" {
 #include <deepdive_ros/Pulse.h>
 #include <deepdive_ros/Motor.h>
 #include <deepdive_ros/Sensor.h>
-#include <deepdive_ros/Lighthouse.h>
-#include <deepdive_ros/Tracker.h>
+#include <deepdive_ros/Lighthouses.h>
+#include <deepdive_ros/Trackers.h>
 
 // Services to get tracker/lighthouse/system config
 #include <deepdive_ros/GetTracker.h>
@@ -48,13 +48,11 @@ std::map<std::string, deepdive_ros::Lighthouse> lighthouses_;
 std::map<std::string, deepdive_ros::Tracker> trackers_;
  
 // Create data publishers
-ros::Publisher pub_lighthouse_;
-ros::Publisher pub_tracker_;
+ros::Publisher pub_lighthouses_;
+ros::Publisher pub_trackers_;
 ros::Publisher pub_light_;
 ros::Publisher pub_event_;
 ros::Publisher pub_imu_;
-ros::ServiceServer srv_tracker_;
-ros::ServiceServer srv_lighthouse_;
 
 // Convert time an return overflow count
 ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
@@ -145,91 +143,73 @@ void ButtonCallback(struct Tracker * tracker, uint32_t timecode,
 // Configuration call from the vive_tool
 void TrackerCallback(struct Tracker * t) {
   if (!t) return;
-  deepdive_ros::Tracker & msg = trackers_[t->serial];
-  // Set the serial number
-  msg.serial = t->serial;
-  // Set the extrinsics
-  msg.sensors.resize(t->cal.num_channels);
+  deepdive_ros::Tracker & tracker = trackers_[t->serial];
+  tracker.serial = t->serial;
+  tracker.sensors.resize(t->cal.num_channels);
   for (size_t i = 0; i < t->cal.num_channels; i++) {
-    msg.sensors[i].position.x = t->cal.positions[i][0];
-    msg.sensors[i].position.y = t->cal.positions[i][1];
-    msg.sensors[i].position.z = t->cal.positions[i][2];
-    msg.sensors[i].normal.x = t->cal.normals[i][0];
-    msg.sensors[i].normal.y = t->cal.normals[i][1];
-    msg.sensors[i].normal.z = t->cal.normals[i][2];
+    tracker.sensors[i].position.x = t->cal.positions[i][0];
+    tracker.sensors[i].position.y = t->cal.positions[i][1];
+    tracker.sensors[i].position.z = t->cal.positions[i][2];
+    tracker.sensors[i].normal.x = t->cal.normals[i][0];
+    tracker.sensors[i].normal.y = t->cal.normals[i][1];
+    tracker.sensors[i].normal.z = t->cal.normals[i][2];
   }
   // Set the IMU sensor calibration data
-  msg.acc_bias.x = t->cal.acc_bias[0];
-  msg.acc_bias.y = t->cal.acc_bias[1];
-  msg.acc_bias.z = t->cal.acc_bias[2];
-  msg.acc_scale.x = t->cal.acc_scale[0];
-  msg.acc_scale.y = t->cal.acc_scale[1];
-  msg.acc_scale.z = t->cal.acc_scale[2];
-  msg.gyr_bias.x = t->cal.gyr_bias[0];
-  msg.gyr_bias.y = t->cal.gyr_bias[1];
-  msg.gyr_bias.z = t->cal.gyr_bias[2];
-  msg.gyr_scale.x = t->cal.gyr_scale[0];
-  msg.gyr_scale.y = t->cal.gyr_scale[1];
-  msg.gyr_scale.z = t->cal.gyr_scale[2];
+  tracker.acc_bias.x = t->cal.acc_bias[0];
+  tracker.acc_bias.y = t->cal.acc_bias[1];
+  tracker.acc_bias.z = t->cal.acc_bias[2];
+  tracker.acc_scale.x = t->cal.acc_scale[0];
+  tracker.acc_scale.y = t->cal.acc_scale[1];
+  tracker.acc_scale.z = t->cal.acc_scale[2];
+  tracker.gyr_bias.x = t->cal.gyr_bias[0];
+  tracker.gyr_bias.y = t->cal.gyr_bias[1];
+  tracker.gyr_bias.z = t->cal.gyr_bias[2];
+  tracker.gyr_scale.x = t->cal.gyr_scale[0];
+  tracker.gyr_scale.y = t->cal.gyr_scale[1];
+  tracker.gyr_scale.z = t->cal.gyr_scale[2];
   // Set the default IMU transform
-  msg.imu_transform.rotation.x = t->cal.imu_transform[0];
-  msg.imu_transform.rotation.y = t->cal.imu_transform[1];
-  msg.imu_transform.rotation.z = t->cal.imu_transform[2];
-  msg.imu_transform.rotation.w = t->cal.imu_transform[3];
-  msg.imu_transform.translation.x = t->cal.imu_transform[4];
-  msg.imu_transform.translation.y = t->cal.imu_transform[5];
-  msg.imu_transform.translation.z = t->cal.imu_transform[6];
-  //  Publish the tracker info
-  pub_tracker_.publish(msg);
+  tracker.imu_transform.rotation.x = t->cal.imu_transform[0];
+  tracker.imu_transform.rotation.y = t->cal.imu_transform[1];
+  tracker.imu_transform.rotation.z = t->cal.imu_transform[2];
+  tracker.imu_transform.rotation.w = t->cal.imu_transform[3];
+  tracker.imu_transform.translation.x = t->cal.imu_transform[4];
+  tracker.imu_transform.translation.y = t->cal.imu_transform[5];
+  tracker.imu_transform.translation.z = t->cal.imu_transform[6];
+  // Send all trackers at once
+  deepdive_ros::Trackers msg;
+  msg.header.stamp = ros::Time::now();
+  msg.header.frame_id = "world";
+  std::map<std::string, deepdive_ros::Tracker>::iterator it;
+  for (it = trackers_.begin(); it != trackers_.end(); it++)
+    msg.trackers.push_back(it->second);
+  pub_trackers_.publish(msg);
 }
 
 // Configuration call from the vive_tool
 void LighthouseCallback(struct Lighthouse *l) {
   if (!l) return;
-  deepdive_ros::Lighthouse & msg = lighthouses_[l->serial];
-  msg.serial = l->serial;
-  msg.motors.resize(2);
+  deepdive_ros::Lighthouse & lighthouse = lighthouses_[l->serial];
+  lighthouse.serial = l->serial;
+  lighthouse.motors.resize(2);
   for (size_t i = 0; i < MAX_NUM_MOTORS; i++) {
-    msg.motors[i].axis = i;
-    msg.motors[i].phase = l->motors[i].phase;
-    msg.motors[i].tilt = l->motors[i].tilt;
-    msg.motors[i].gibphase = l->motors[i].gibphase;
-    msg.motors[i].gibmag = l->motors[i].gibmag;
-    msg.motors[i].curve = l->motors[i].curve;
+    lighthouse.motors[i].axis = i;
+    lighthouse.motors[i].phase = l->motors[i].phase;
+    lighthouse.motors[i].tilt = l->motors[i].tilt;
+    lighthouse.motors[i].gibphase = l->motors[i].gibphase;
+    lighthouse.motors[i].gibmag = l->motors[i].gibmag;
+    lighthouse.motors[i].curve = l->motors[i].curve;
   }
-  msg.acceleration.x = l->accel[0];
-  msg.acceleration.y = l->accel[1];
-  msg.acceleration.z = l->accel[2];
-  // Publish the lighthouse info
-  pub_lighthouse_.publish(msg);
-}
-
-// Get a single or list of lighthouses 
-bool GetLighthouse(deepdive_ros::GetLighthouse::Request  &req,
-  deepdive_ros::GetLighthouse::Response &res) {
-  if (req.serial.empty()) {
-    res.lighthouses.reserve(lighthouses_.size());
-    std::map<std::string, deepdive_ros::Lighthouse>::const_iterator it;
-    for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)
-      res.lighthouses.push_back(it->second);
-  } else if (lighthouses_.find(req.serial) != lighthouses_.end()) {
-    res.lighthouses.push_back(lighthouses_[req.serial]);
-  }
-  return true;
-}
-
-// Get a single or list of trackers 
-bool GetTracker(deepdive_ros::GetTracker::Request  &req,
-  deepdive_ros::GetTracker::Response &res) {
-  if (req.serial.empty()) {
-    res.trackers.reserve(trackers_.size());
-    std::map<std::string, deepdive_ros::Tracker>::const_iterator it;
-    for (it = trackers_.begin(); it != trackers_.end(); it++)
-      res.trackers.push_back(it->second);
-  } else if (trackers_.find(req.serial) != trackers_.end()) {
-    res.trackers.push_back(trackers_[req.serial]);
-  }
-  return true;
+  lighthouse.acceleration.x = l->accel[0];
+  lighthouse.acceleration.y = l->accel[1];
+  lighthouse.acceleration.z = l->accel[2];
+  // Send all lighthouses at once
+  deepdive_ros::Lighthouses msg;
+  msg.header.stamp = ros::Time::now();
+  msg.header.frame_id = "world";
+  std::map<std::string, deepdive_ros::Lighthouse>::iterator it;
+  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)
+    msg.lighthouses.push_back(it->second);
+  pub_lighthouses_.publish(msg);
 }
 
 // Main entry point of application
@@ -238,18 +218,16 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "deepdive_bridge");
   ros::NodeHandle nh;
 
-  // Create data publishers
-  pub_lighthouse_ = nh.advertise<deepdive_ros::Lighthouse>("lighthouse", 10, true);
-  pub_tracker_ = nh.advertise<deepdive_ros::Tracker>("tracker", 10, true);
+  // Latched publishers
+  pub_lighthouses_ =
+    nh.advertise<deepdive_ros::Lighthouses>("lighthouses", 10, true);
+  pub_trackers_ =
+    nh.advertise<deepdive_ros::Trackers>("trackers", 10, true);
+
+  // Non-latched
   pub_light_ = nh.advertise<deepdive_ros::Light>("light", 10);
   pub_event_ = nh.advertise<deepdive_ros::Event>("event", 10);
   pub_imu_ = nh.advertise<sensor_msgs::Imu>("imu", 10);
-
-  // Service calls to request tracker metadata
-  srv_tracker_ =
-    nh.advertiseService("get_tracker", GetTracker);
-  srv_lighthouse_ =
-    nh.advertiseService("get_lighthouse", GetLighthouse);
 
   // Try to initialize vive
   struct Driver *driver = deepdive_init();
