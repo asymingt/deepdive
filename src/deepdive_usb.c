@@ -317,6 +317,8 @@ int deepdive_usb_init(struct Driver * drv) {
     struct Tracker *tracker = malloc(sizeof(struct Tracker));
     if (!tracker)
       continue;
+    // Make sure the memory is zeroed
+    memset(tracker, 0, sizeof(struct Tracker));
     tracker->driver = drv;
 
     // Null the lighthouse pointer

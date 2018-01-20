@@ -42,9 +42,8 @@ struct Driver * deepdive_init() {
   struct Driver *drv = malloc(sizeof(struct Driver));
   if (drv == NULL)
     return NULL;
-  // We haven't yet pushed the data
-  drv->pushed = 0;
-  drv->num_trackers=0;
+  // Make sure we are zeroed by default
+  memset(drv, 0, sizeof(struct Driver));
   // General constants
   drv->general.timebase_hz            = 48000000UL; // Ticks per second
   drv->general.timecenter_ticks       = 200000UL;   // Midpoint of sweep
