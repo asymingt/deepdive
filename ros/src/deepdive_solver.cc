@@ -18,16 +18,12 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/PoseArray.h>
-
-// For rviz
 #include <nav_msgs/Path.h>
 
 // Non-standard datra messages
 #include <deepdive_ros/Light.h>
-
-// Services to get tracker/lighthouse/system config
-#include <deepdive_ros/GetTracker.h>
-#include <deepdive_ros/GetLighthouse.h>
+#include <deepdive_ros/Lighthouses.h>
+#include <deepdive_ros/Trackers.h>
 
 // Ceres and logging
 #include <ceres/ceres.h>
@@ -487,26 +483,32 @@ void WorkerThread() {
 std::vector<std::string> permitted_lighthouses_;
 std::vector<std::string> permitted_trackers_;
 
-void LighthouseCallback(deepdive_ros::Lighthouse::ConstPtr const& msg) {
-  if (std::find(permitted_lighthouses_.begin(), permitted_lighthouses_.end(),
-    msg->serial) == permitted_lighthouses_.end()) return;
+void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg) {
   std::unique_lock<std::mutex> lock(mutex_);
-  lighthouses_.push(*msg);
+  std::vector<deepdive_ros::Lighthouse>::const_iterator it;
+  for (it = msg->lighthouses.begin(); it != msg->lighthouses.end(); it++) {
+    if (std::find(permitted_lighthouses_.begin(), permitted_lighthouses_.end(),
+      it->serial) == permitted_lighthouses_.end()) return;
+    lighthouses_.push(*it);
+  }
 }
 
-void TrackerCallback(deepdive_ros::Tracker::ConstPtr const& msg) {
-  if (std::find(permitted_trackers_.begin(), permitted_trackers_.end(),
-    msg->serial) == permitted_trackers_.end()) return;
+void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
   std::unique_lock<std::mutex> lock(mutex_);
-  trackers_.push(*msg);
+  std::vector<deepdive_ros::Tracker>::const_iterator it;
+  for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
+    if (std::find(permitted_trackers_.begin(), permitted_trackers_.end(),
+      it->serial) == permitted_trackers_.end()) return;
+    trackers_.push(*it);
+  }
 }
 
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
+  std::unique_lock<std::mutex> lock(mutex_);
   if (std::find(permitted_trackers_.begin(), permitted_trackers_.end(),
     msg->header.frame_id) == permitted_trackers_.end()) return;
   if (std::find(permitted_lighthouses_.begin(), permitted_lighthouses_.end(),
     msg->lighthouse) == permitted_lighthouses_.end()) return;
-  std::unique_lock<std::mutex> lock(mutex_);
   light_.push(*msg);
 }
 
