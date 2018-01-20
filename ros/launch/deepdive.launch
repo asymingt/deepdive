@@ -9,7 +9,7 @@
         pkg="rosbag" type="record" args="-O $(arg record) -a"/>
   <!-- Bridge or bag replay, depending on arguments -->
   <node if="$(eval arg('replay') != '')" name="deepdive_player"
-        pkg="rosbag" type="play" args="--clock --loop $(arg replay)"/>
+        pkg="rosbag" type="play" args="--clock $(arg replay)"/>
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
         pkg="deepdive_ros" type="deepdive_bridge"/>
   <!-- Each rigid cluster needs a solver -->
