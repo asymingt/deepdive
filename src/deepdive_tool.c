@@ -60,8 +60,8 @@ void my_imu_process(struct Tracker * tracker, uint32_t timecode,
   g[0] = (float)(gyr[0]) * ((1./32.768)*(3.14159/180.));
   g[1] = (float)(gyr[1]) * ((1./32.768)*(3.14159/180.));
   g[2] = (float)(gyr[2]) * ((1./32.768)*(3.14159/180.));
-  printf("[%010u] # %s I - ACC (%7.3f,%7.3f,%7.3f) GYR (%7.3f,%7.3f,%7.3f)\n", timecode,
-    tracker->serial, a[0], a[1], a[2], g[0], g[1], g[2]);
+  printf("[%010u] # %s I - ACC (%7.3f,%7.3f,%7.3f) GYR (%7.3f,%7.3f,%7.3f)\n",
+    timecode, tracker->serial, a[0], a[1], a[2], g[0], g[1], g[2]);
 }
 
 // Callback to display button info
@@ -75,8 +75,6 @@ void my_but_process(struct Tracker * tracker,
     printf("[EVENT] MENU\n");
   else if (mask & BUTTON_PAD_CLICK)
     printf("[EVENT] PAD_CLICK - %hd %hd\n", horizontal, vertical);
-  else if (mask & BUTTON_PAD_TOUCH)
-    printf("[EVENT] PAD_TOUCH - %hd %hd\n", horizontal, vertical);
   else if (mask & BUTTON_PAD_TOUCH)
     printf("[EVENT] PAD_TOUCH - %hd %hd\n", horizontal, vertical);
   else
