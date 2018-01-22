@@ -64,8 +64,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#define MAX_NUM_SENSORS      22
-#define SIGMA_ANGLE          0.001
+#define MAX_NUM_SENSORS      32
+#define SIGMA_ANGLE          1.0
 #define SIGMA_MOTION         1.0
 
 // Calibration parameter
@@ -121,7 +121,7 @@ void CombineTransforms(const T ti[6], const T tj[6], T tji[6]) {
   static T qi[4], qj[4], qji[4];
   ceres::AngleAxisToQuaternion(&ti[3], qi);
   ceres::AngleAxisToQuaternion(&tj[3], qj);
-  ceres::QuaternionProduct(qi, qj, qji);
+  ceres::QuaternionProduct(qj, qi, qji);
   ceres::QuaternionToAngleAxis(qji, &tji[3]);
   for (size_t i = 0; i < 3; i++)
     tji[i] = ti[i] + tj[i];
@@ -181,10 +181,10 @@ struct LightCost {
       // This might cause numerical instability
       switch (a) {
       case deepdive_ros::Motor::AXIS_HORIZONTAL:
-        residual[i] = atan(Sx[1] / Sx[2]) + T(measurement_.pulses[i].angle);
+        residual[i] = atan2(Sx[1], Sx[2]) + T(measurement_.pulses[i].angle);
         break;
       case deepdive_ros::Motor::AXIS_VERTICAL:
-        residual[i] = atan(Sx[0] / Sx[2]) - T(measurement_.pulses[i].angle);
+        residual[i] = atan2(Sx[0], Sx[2]) - T(measurement_.pulses[i].angle);
         break;
       default:
         ROS_WARN("Axis ID error");
@@ -420,8 +420,8 @@ void WorkerThread() {
       }
       // Define the ceres problem
       ceres::Solver::Options options;
-      options.num_threads = 16;
-      options.num_linear_solver_threads = 16;
+      options.num_threads = 4;
+      options.num_linear_solver_threads = 4;
       options.minimizer_progress_to_stdout = false;
       options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
       ceres::Solver::Summary summary;
@@ -536,9 +536,9 @@ int main(int argc, char **argv) {
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  =
-    nh.subscribe("/tracker", 10, TrackerCallback);
+    nh.subscribe("/trackers", 10, TrackerCallback);
   ros::Subscriber sub_lighthouse =
-    nh.subscribe("/lighthouse", 10, LighthouseCallback);
+    nh.subscribe("/lighthouses", 10, LighthouseCallback);
   ros::Subscriber sub_light =
     nh.subscribe("/light", 10, LightCallback);
   ros::Subscriber sub_corrrection =

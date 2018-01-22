@@ -16,17 +16,13 @@ extern "C" {
 #include <geometry_msgs/Vector3.h>
 
 // Non-standard messages
-#include <deepdive_ros/Event.h>
+#include <deepdive_ros/Button.h>
 #include <deepdive_ros/Light.h>
 #include <deepdive_ros/Pulse.h>
 #include <deepdive_ros/Motor.h>
 #include <deepdive_ros/Sensor.h>
 #include <deepdive_ros/Lighthouses.h>
 #include <deepdive_ros/Trackers.h>
-
-// Services to get tracker/lighthouse/system config
-#include <deepdive_ros/GetTracker.h>
-#include <deepdive_ros/GetLighthouse.h>
 
 // C++ includes
 #include <cstdint>
@@ -50,8 +46,8 @@ std::map<std::string, deepdive_ros::Tracker> trackers_;
 // Create data publishers
 ros::Publisher pub_lighthouses_;
 ros::Publisher pub_trackers_;
+ros::Publisher pub_button_;
 ros::Publisher pub_light_;
-ros::Publisher pub_event_;
 ros::Publisher pub_imu_;
 
 // Convert time an return overflow count
@@ -129,15 +125,17 @@ void ImuCallback(struct Tracker * tracker, uint32_t timecode,
 }
 
 // Called when a button is pressed
-void ButtonCallback(struct Tracker * tracker, uint32_t timecode,
-  uint8_t mask) {
-  // Package up the IMU data
-  static deepdive_ros::Event msg;
-  msg.header.frame_id = tracker->serial;
-  msg.header.stamp = TimeConvert(tracker->serial, timecode);
+void ButtonCallback(struct Tracker * tracker,
+  uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical) {
+  // Package up the button data
+  static deepdive_ros::Button msg;
+  msg.tracker = tracker->serial;
   msg.mask = mask;
+  msg.trigger_val = trigger;
+  msg.pad_x = horizontal;
+  msg.pad_y = vertical;
   // Publish the data
-  pub_event_.publish(msg);
+  pub_button_.publish(msg);
 }
 
 // Configuration call from the vive_tool
@@ -226,7 +224,7 @@ int main(int argc, char **argv) {
 
   // Non-latched
   pub_light_ = nh.advertise<deepdive_ros::Light>("light", 10);
-  pub_event_ = nh.advertise<deepdive_ros::Event>("event", 10);
+  pub_button_ = nh.advertise<deepdive_ros::Button>("button", 10);
   pub_imu_ = nh.advertise<sensor_msgs::Imu>("imu", 10);
 
   // Try to initialize vive
