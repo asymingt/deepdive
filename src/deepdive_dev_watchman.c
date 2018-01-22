@@ -57,35 +57,41 @@ static void watchman_decode(struct Tracker * tracker, uint8_t *buf) {
   uint8_t qty = POP1;
   uint8_t time2 = POP1;
   uint8_t type = POP1;
-  uint8_t buttonmask;
+  uint32_t buttonmask = 0;
+  uint16_t trigger = 0;
+  int16_t horizontal = 0;
+  int16_t vertical = 0;
 
   qty-=2;
   int propset = 0;
   int doimu = 0;
-
   if ((type & 0xf0) == 0xf0) {
     propset |= 4;
     type &= ~0x10;
-
+    // Deal with buttons
     if (type & 0x01) {
       qty-=1;
-      uint8_t buttonmask = POP1;
-      if (buttonmask != tracker->buttonmask)
-        deepdive_data_button(tracker, (time1<<24)|(time2<<16), buttonmask);
+      uint8_t mask = POP1;
+      if (mask & 0x01) buttonmask |= BUTTON_TRIGGER;
+      if (mask & 0x10) buttonmask |= BUTTON_GRIP;
+      if (mask & 0x20) buttonmask |= BUTTON_MENU;
+      if (mask & 0x04) buttonmask |= BUTTON_PAD_CLICK;
+      if (mask & 0x02) buttonmask |= BUTTON_PAD_TOUCH;
+      //printf("%x\n", mask);
       type &= ~0x01;
     }
     if (type & 0x04) {
       qty-=1;
-      tracker->axis[0] = ( POP1 ) * 128; 
+      trigger = (POP1) * 128; 
       type &= ~0x04;
     }
     if (type & 0x02) {
       qty-=4;
-      tracker->axis[1] = POP2;
-      tracker->axis[2] = POP2;
+      horizontal = POP2;
+      vertical = POP2;
       type &= ~0x02;
     }
-
+    deepdive_data_button(tracker, buttonmask, trigger, horizontal,vertical);
     //XXX TODO: Is this correct?  It looks SO WACKY
     type &= 0x7f;
     if (type == 0x68) doimu = 1;

@@ -65,16 +65,22 @@ void my_imu_process(struct Tracker * tracker, uint32_t timecode,
 }
 
 // Callback to display button info
-void my_but_process(struct Tracker * tracker, uint32_t timecode, uint8_t mask) {
-  printf("[%u][%s] B - %u%u%u%u%u%u%u%un", timecode, tracker->serial,
-    mask & (1<<7) ? 1 : 0,
-    mask & (1<<6) ? 1 : 0,
-    mask & (1<<5) ? 1 : 0,
-    mask & (1<<4) ? 1 : 0,
-    mask & (1<<3) ? 1 : 0,
-    mask & (1<<2) ? 1 : 0,
-    mask & (1<<1) ? 1 : 0,
-    mask & (1<<0) ? 1 : 0);
+void my_but_process(struct Tracker * tracker,
+  uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical) {
+  if (mask & BUTTON_TRIGGER)
+    printf("[EVENT] TRIGGER_CLICK\n");
+  else if (mask & BUTTON_GRIP)
+    printf("[EVENT] GRIP\n");
+  else if (mask & BUTTON_MENU)
+    printf("[EVENT] MENU\n");
+  else if (mask & BUTTON_PAD_CLICK)
+    printf("[EVENT] PAD_CLICK - %hd %hd\n", horizontal, vertical);
+  else if (mask & BUTTON_PAD_TOUCH)
+    printf("[EVENT] PAD_TOUCH - %hd %hd\n", horizontal, vertical);
+  else if (mask & BUTTON_PAD_TOUCH)
+    printf("[EVENT] PAD_TOUCH - %hd %hd\n", horizontal, vertical);
+  else
+    printf("[EVENT] TRIGGER - %hu\n", trigger);
 }
 
 int main() {

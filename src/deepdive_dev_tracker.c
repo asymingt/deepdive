@@ -86,3 +86,13 @@ void deepdive_dev_tracker_imu(struct Tracker * tracker,
   */
   deepdive_data_imu(tracker, timecode, acc, gyr, NULL);
 }
+
+// Process button data
+void deepdive_dev_tracker_button(struct Tracker * tracker,
+  const uint8_t *buf, int32_t len) {
+  uint32_t mask = *((uint32_t*)(buf+7));
+  int16_t horizontal = *((int16_t*)(buf+20));
+  int16_t vertical = *((int16_t*)(buf+22));
+  uint16_t trigger = *((uint16_t*)(buf+26));
+  deepdive_data_button(tracker, mask, trigger, horizontal, vertical);
+}

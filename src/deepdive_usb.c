@@ -61,6 +61,9 @@ static void interrupt_handler(struct libusb_transfer* t) {
    case TRACKER_LIGHT:
     deepdive_dev_tracker_light(ep->tracker, ep->buffer, t->actual_length);
     break;
+   case TRACKER_BUTTONS:
+    deepdive_dev_tracker_button(ep->tracker, ep->buffer, t->actual_length);
+    break;
    case WATCHMAN:
     deepdive_dev_watchman(ep->tracker, ep->buffer, t->actual_length);
     break;
@@ -275,11 +278,13 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
     printf( "Error: data for config descriptor is bad. (%d)", len);
     return -5;
   }
+  /*
   char fstname[128];
   sprintf(fstname, "%s.json.gz", tracker->serial);
   FILE *f = fopen( fstname, "wb" );
   fwrite(uncompressed_data, len, 1, f);
   fclose(f);
+  */
   // Parse the JSON data structure
   json_parse(tracker, uncompressed_data);
   return 0;
@@ -352,6 +357,7 @@ int deepdive_usb_init(struct Driver * drv) {
      ///////////////////////////////
      case USB_PROD_CONTROLLER:
      case USB_PROD_TRACKER:
+      // Endpoint for IMU
       tracker->endpoints[0].tracker = tracker;
       tracker->endpoints[0].type = TRACKER_IMU;
       tracker->endpoints[0].tx = libusb_alloc_transfer(0);
@@ -363,6 +369,7 @@ int deepdive_usb_init(struct Driver * drv) {
       ret = libusb_submit_transfer(tracker->endpoints[0].tx);
       if(ret)
         goto fail;
+      // Endpoint for light
       tracker->endpoints[1].tracker = tracker;
       tracker->endpoints[1].type = TRACKER_LIGHT;
       tracker->endpoints[1].tx = libusb_alloc_transfer(0);
@@ -372,6 +379,18 @@ int deepdive_usb_init(struct Driver * drv) {
         USB_ENDPOINT_LIGHT, tracker->endpoints[1].buffer,
         USB_INT_BUFF_LENGTH, interrupt_handler, &tracker->endpoints[1], 0);
       ret = libusb_submit_transfer(tracker->endpoints[1].tx);
+      if(ret)
+        goto fail;
+      // Endpoint for buttons
+      tracker->endpoints[2].tracker = tracker;
+      tracker->endpoints[2].type = TRACKER_BUTTONS;
+      tracker->endpoints[2].tx = libusb_alloc_transfer(0);
+      if (!tracker->endpoints[2].tx)
+        goto fail;
+      libusb_fill_interrupt_transfer(tracker->endpoints[2].tx, tracker->udev,
+        USB_ENDPOINT_BUTTONS, tracker->endpoints[2].buffer,
+        USB_INT_BUFF_LENGTH, interrupt_handler, &tracker->endpoints[2], 0);
+      ret = libusb_submit_transfer(tracker->endpoints[2].tx);
       if(ret)
         goto fail;
       // Send a magic code to power on the tracker

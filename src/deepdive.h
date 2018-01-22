@@ -63,7 +63,8 @@
 
 #define USB_ENDPOINT_GENERAL  0x81
 #define USB_ENDPOINT_LIGHT    0x82
-#define MAX_ENDPOINTS         2
+#define USB_ENDPOINT_BUTTONS  0x83
+#define MAX_ENDPOINTS         3
 
 #define DEFAULT_ACC_SCALE     (float)(9.80665/4096.0)
 #define DEFAULT_GYR_SCALE     (float)((1./32.768)*(3.14159/180.));
@@ -74,10 +75,21 @@ struct Tracker;
 
 // Extrinsics axes
 typedef enum {
-  TRACKER_IMU   = 0,
-  TRACKER_LIGHT = 1,
-  WATCHMAN      = 2
+  TRACKER_IMU       = 0,
+  TRACKER_LIGHT     = 1,
+  TRACKER_BUTTONS   = 2,
+  WATCHMAN          = 3,
+  WATCHMAN_BUTTONS  = 4
 } CallbackType;
+
+// Button types
+typedef enum {
+  BUTTON_TRIGGER    = (1<<8),
+  BUTTON_GRIP       = (1<<10),
+  BUTTON_MENU       = (1<<20),
+  BUTTON_PAD_CLICK  = (1<<26),
+  BUTTON_PAD_TOUCH  = (1<<28)
+} ButtonType;
 
 // Interrupt buffer for an endpoint
 struct Endpoint {
@@ -217,11 +229,10 @@ typedef void (*lig_func)(struct Tracker * tracker, struct Lighthouse * lighthous
   uint16_t *sensors,  uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths);
 typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
-typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t mask);
+typedef void (*but_func)(struct Tracker * tracker,
+  uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical);
 typedef void (*tracker_func)(struct Tracker * tracker);
 typedef void (*lighthouse_func)(struct Lighthouse * lighthouse);
-typedef void (*general_func)(struct General * general);
 
 // Driver context
 struct Driver {
@@ -233,7 +244,6 @@ struct Driver {
   but_func but_fn;               // Called when new button data arrives
   tracker_func tracker_fn;       // Called when tracker cal info is ready
   lighthouse_func lighthouse_fn; // Called when lighthouse cal info is ready
-  general_func general_fn;       // Called when general cal info is ready
   struct Lighthouse lighthouses[MAX_NUM_LIGHTHOUSES];
   struct General general;        // General configuration
   uint8_t pushed;                // Have we pushed thie tracker/general config
@@ -256,9 +266,6 @@ void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp);
 
 // Register an button callback function
 void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp);
-
-// Register an button callback function
-void deepdive_install_general_fn(struct Driver * drv, general_func fbp);
 
 // Get the general configuration data
 struct General * deepdive_general(struct Driver * drv);

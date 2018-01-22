@@ -94,12 +94,6 @@ void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp) {
   if (fbp) drv->lighthouse_fn = fbp;
 }
 
-// Register an button callback function
-void deepdive_install_general_fn(struct Driver * drv, general_func fbp) {
-  if (drv == NULL) return;
-  if (fbp) drv->general_fn = fbp;
-}
-
 // GETTERS
 
 // Get the general configuration data
@@ -133,9 +127,9 @@ int deepdive_poll(struct Driver * drv) {
   if (drv == NULL) return -1;
   // Push general and tracker config
   if (drv->pushed == 0) {
-    if (drv->general_fn) drv->general_fn(&drv->general);
     for (size_t i = 0; i < drv->num_trackers; i++)
-      if (drv->tracker_fn) drv->tracker_fn(drv->trackers[i]);
+      if (drv->tracker_fn)
+        drv->tracker_fn(drv->trackers[i]);
     drv->pushed = 1;
   }
   // Handle any USB events
