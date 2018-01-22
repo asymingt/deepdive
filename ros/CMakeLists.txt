@@ -16,12 +16,12 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 ## EXTERNAL SOURCES
 
 # libukf - a C++ implementation of the unscented kalman filter
-ExternalProject_Add(ukf
-  GIT_REPOSITORY https://github.com/sfwa/ukf.git
-  GIT_TAG master
-  INSTALL_COMMAND "")
-ExternalProject_Get_Property(ukf source_dir)
-set(UKF_INCLUDE_DIRS ${source_dir}/include)
+# ExternalProject_Add(ukf
+#   GIT_REPOSITORY https://github.com/sfwa/ukf.git
+#   GIT_TAG master
+#   INSTALL_COMMAND "")
+# ExternalProject_Get_Property(ukf source_dir)
+# set(UKF_INCLUDE_DIRS ${source_dir}/include)
 
 # Non-linear least squares optimization (apt install libceres-dev)
 find_package(Ceres REQUIRED)
@@ -35,7 +35,7 @@ find_package(catkin_simple REQUIRED)
 # Setup the include directories
 include_directories(
   ${DEEPDIVE_INCLUDE_DIRS}
-  ${UKF_INCLUDE_DIRS}
+#  ${UKF_INCLUDE_DIRS}
   ${CERES_INCLUDE_DIRS})
 
 ## THIS PROJECT
