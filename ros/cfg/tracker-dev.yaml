@@ -1,33 +1,28 @@
 serial: "LHR-09DF88FD"
 frame: "dev"
-gravity: [0, 0, -9.80665]
-rate: 120
-estimate:
-  position: [0, 0, 0]
-  attitude: [0, 0, 0, 1]
-  velocity: [0, 0, 0]
-  acceleration: [0, 0, 0]
-  omega: [0, 0, 0]
-  alpha: [0, 0, 0]
-  gyro_bias: [0, 0, 0]
-  accel_bias: [0, 0, 0]
-covariance:
-  position: [10, 10, 10]
-  attitude: [10, 10, 10]
-  velocity: [1.0e-6, 1.0e-6, 1.0e-6]
-  acceleration: [1.0e-6, 1.0e-6, 1.0e-6]
-  omega: [1.0e-6, 1.0e-6, 1.0e-6]
-  alpha: [1.0e-6, 1.0e-6, 1.0e-6]
-  gyro_bias: [1.0e-2, 1.0e-2, 1.0e-2]
-  accel_bias: [1.0e-2, 1.0e-2, 1.0e-2]
-noise:
-  position: [0, 0, 0]
-  attitude: [0, 0, 0]
-  velocity: [0, 0, 0]
-  acceleration: [0, 0, 0]
-  omega: [0, 0, 0]
-  alpha: [0, 0, 0]
-  gyro_bias: [7.7e-6, 7.7e-6, 7.7e-6]
-  accel_bias: [1.0e-12, 1.0e-12, 1.0e-12]
-
-
+gravity:          [0, 0, -9.80665]
+rate: 250
+initial_estimate:
+  position:       [0, 0, 2.0]
+  attitude:       [0, 0, 0, 1]
+  velocity:       [0, 0, 0]
+  acceleration:   [0, 0, 0]
+  omega:          [0, 0, 0]
+  alpha:          [0, 0, 0]
+  gyro_bias:      [0, 0, 0]
+initial_covariance:
+  position:       [100, 100, 100]
+  attitude:       [10, 10, 10]
+  velocity:       [1.0e-06, 1.0e-06, 1.0e-06]
+  acceleration:   [1.0e-06, 1.0e-06, 1.0e-06]
+  omega:          [1.0e-06, 1.0e-06, 1.0e-06]
+  alpha:          [1.0e-06, 1.0e-06, 1.0e-06]
+  gyro_bias:      [0.01, 0.01, 0.01]
+process_noise:
+  position:       [1.0e-17, 1.0e-17, 1.0e-17]
+  attitude:       [7.0e-08, 7.0e-08, 7.0e-08]
+  velocity:       [2.0e-03, 2.0e-03, 2.0e-03]
+  acceleration:   [2.0e-02, 2.0e-02, 2.0e-02]
+  omega:          [1.0e-03, 1.0e-03, 1.0e-03]
+  alpha:          [1.0e-03, 1.0e-03, 1.0e-03]
+  gyro_bias:      [1.0e-12, 1.0e-12, 1.0e-12]

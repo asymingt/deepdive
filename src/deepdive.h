@@ -171,8 +171,8 @@ struct Tracker {
 
 // Motor information
 typedef enum {
-  MOTOR_VERTICAL   = 0,
-  MOTOR_HORIZONTAL = 1,
+  MOTOR_HORIZONTAL = 0,
+  MOTOR_VERTICAL   = 1,
   MAX_NUM_MOTORS   = 2
 } MotorType;
 

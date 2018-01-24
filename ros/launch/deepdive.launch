@@ -29,7 +29,6 @@
   </node>
   -->
   <!-- Visualization -->
-  <node if="$(arg rviz)" name="deepdive_rviz"
-        pkg="rviz" type="rviz"  respawn="true"
+  <node if="$(arg rviz)" name="deepdive_rviz" pkg="rviz" type="rviz"
         args="-d $(find deepdive_ros)/rviz/deepdive.rviz"/>
 </launch>
