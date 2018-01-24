@@ -178,6 +178,9 @@ static int json_parse(struct Tracker * tracker, const char* data) {
   if (json_object_object_get_ex(jobj, "trackref_from_imu", &jtmp))
     if (!json_read_arr_dbl(jtmp, tracker->cal.imu_transform, 7))
       printf("Could not read the JSON field: trackref_from_imu\n");
+  if (json_object_object_get_ex(jobj, "trackref_from_head", &jtmp))
+    if (!json_read_arr_dbl(jtmp, tracker->cal.head_transform, 7))
+      printf("Could not read the JSON field: trackref_from_head\n");
   // Photodiode calibration parameters
   json_object *jlhc;
   if (json_object_object_get_ex(jobj, "lighthouse_config", &jlhc)) {

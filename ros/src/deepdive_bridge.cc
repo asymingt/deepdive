@@ -3,10 +3,13 @@
   to pull data from all available trackers, as well as lighthouse/tracker info.
 */
 
-// Libsurvive interface
+// Libdeepdive interface
 extern "C" {
   #include <deepdive/deepdive.h>
 }
+
+// Utility functions
+#include <deepdive.hh>
 
 // ROS includes
 #include <ros/ros.h>
@@ -145,34 +148,20 @@ void TrackerCallback(struct Tracker * t) {
   tracker.serial = t->serial;
   tracker.sensors.resize(t->cal.num_channels);
   for (size_t i = 0; i < t->cal.num_channels; i++) {
-    tracker.sensors[i].position.x = t->cal.positions[i][0];
-    tracker.sensors[i].position.y = t->cal.positions[i][1];
-    tracker.sensors[i].position.z = t->cal.positions[i][2];
-    tracker.sensors[i].normal.x = t->cal.normals[i][0];
-    tracker.sensors[i].normal.y = t->cal.normals[i][1];
-    tracker.sensors[i].normal.z = t->cal.normals[i][2];
+    Convert(t->cal.positions[i], tracker.sensors[i].position);
+    Convert(t->cal.normals[i], tracker.sensors[i].normal);
   }
   // Set the IMU sensor calibration data
-  tracker.acc_bias.x = t->cal.acc_bias[0];
-  tracker.acc_bias.y = t->cal.acc_bias[1];
-  tracker.acc_bias.z = t->cal.acc_bias[2];
-  tracker.acc_scale.x = t->cal.acc_scale[0];
-  tracker.acc_scale.y = t->cal.acc_scale[1];
-  tracker.acc_scale.z = t->cal.acc_scale[2];
-  tracker.gyr_bias.x = t->cal.gyr_bias[0];
-  tracker.gyr_bias.y = t->cal.gyr_bias[1];
-  tracker.gyr_bias.z = t->cal.gyr_bias[2];
-  tracker.gyr_scale.x = t->cal.gyr_scale[0];
-  tracker.gyr_scale.y = t->cal.gyr_scale[1];
-  tracker.gyr_scale.z = t->cal.gyr_scale[2];
+  Convert(t->cal.acc_bias, tracker.acc_bias);
+  Convert(t->cal.acc_scale, tracker.acc_scale);
+  Convert(t->cal.gyr_bias, tracker.gyr_bias);
+  Convert(t->cal.gyr_scale, tracker.gyr_scale);
   // Set the default IMU transform
-  tracker.imu_transform.rotation.x = t->cal.imu_transform[0];
-  tracker.imu_transform.rotation.y = t->cal.imu_transform[1];
-  tracker.imu_transform.rotation.z = t->cal.imu_transform[2];
-  tracker.imu_transform.rotation.w = t->cal.imu_transform[3];
-  tracker.imu_transform.translation.x = t->cal.imu_transform[4];
-  tracker.imu_transform.translation.y = t->cal.imu_transform[5];
-  tracker.imu_transform.translation.z = t->cal.imu_transform[6];
+  Convert(&t->cal.imu_transform[0], tracker.imu_transform.rotation);
+  Convert(&t->cal.imu_transform[4], tracker.imu_transform.translation);
+  // Set the default IMU transform
+  Convert(&t->cal.head_transform[0], tracker.head_transform.rotation);
+  Convert(&t->cal.head_transform[4], tracker.head_transform.translation);
   // Send all trackers at once
   deepdive_ros::Trackers msg;
   msg.header.stamp = ros::Time::now();
@@ -197,9 +186,8 @@ void LighthouseCallback(struct Lighthouse *l) {
     lighthouse.motors[i].gibmag = l->motors[i].gibmag;
     lighthouse.motors[i].curve = l->motors[i].curve;
   }
-  lighthouse.acceleration.x = l->accel[0];
-  lighthouse.acceleration.y = l->accel[1];
-  lighthouse.acceleration.z = l->accel[2];
+  // Get the lighthouse orientation
+  Convert(l->accel, lighthouse.acceleration);
   // Send all lighthouses at once
   deepdive_ros::Lighthouses msg;
   msg.header.stamp = ros::Time::now();
@@ -222,7 +210,7 @@ int main(int argc, char **argv) {
   pub_trackers_ =
     nh.advertise<deepdive_ros::Trackers>("trackers", 10, true);
 
-  // Non-latched
+  // Non-latched publishers
   pub_light_ = nh.advertise<deepdive_ros::Light>("light", 10);
   pub_button_ = nh.advertise<deepdive_ros::Button>("button", 10);
   pub_imu_ = nh.advertise<sensor_msgs::Imu>("imu", 10);

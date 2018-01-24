@@ -42,11 +42,6 @@
 #include <stdint.h>
 #include <string.h>
 
-// Uncomment the line below if you want the IMU in the tracker
-// frame (this might affect scale and bias parameters). By
-// default we keep this in the IMU frame.
-// #define IMU_FRAME_TRACKER
-
 #define MAX_PACKET_LEN        64
 #define PREAMBLE_LENGTH       17
 
@@ -110,7 +105,9 @@ struct Calibration {
   float acc_scale[3];                       // Accelerometer scale
   float gyr_bias[3];                        // Gyro bias
   float gyr_scale[3];                       // Gyro scale
-  float imu_transform[7];                   // IMU transform (qx,qy,qz,qw),X,Y,Z
+  // Transforms below are (wx, qy, qz, qw, X, Y, Z)
+  float imu_transform[7];                   // Tracker -> IMU trasform
+  float head_transform[7];                  // Tracker -> Head transform
 };
 
 typedef struct {

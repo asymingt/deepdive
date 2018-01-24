@@ -11,6 +11,9 @@
 // ROS includes
 #include <ros/ros.h>
 
+// Utility functions
+#include <deepdive.hh>
+
 // For transforms
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -150,9 +153,9 @@ struct LightCost {
     measurement_(measurement) {}
   // Called by ceres-solver to calculate error
   template <typename T>
-  bool operator()(const T* const Tl_w,          // Lighthouse pose
-                  const T* const Tb_w,          // Body pose
-                  const T* const Tt_b,          // Tracker pose
+  bool operator()(const T* const Tl_w,          // Lighthouse in world frame
+                  const T* const Tb_w,          // Body in world frame
+                  const T* const Tt_b,          // Tracker in body frame
                   const T* const calibration,   // Lighthouse calibration
                   const T* const extrinsics,    // Tracker extrinsics
                   T* residual) const {
@@ -165,9 +168,9 @@ struct LightCost {
     InvertTransform(Tb_w, Tw_b);
     InvertTransform(Tt_b, Tb_t);
     CombineTransforms(Tw_b, Tb_t, Tw_t);
-    // Iterate over all emasurements
+    // Iterate over all measurements
     for (size_t i = 0; i < measurement_.pulses.size(); i++) {
-      // Get the transform that moves the tracker to the world frame
+      // Get the transform that moves the tracker to the lighthouse frame
       CombineTransforms(Tl_w, Tw_t, Tl_t);
       // Get the sensor position in the lighthouse frame
       s = static_cast<uint16_t>(measurement_.pulses[i].sensor);
@@ -177,14 +180,17 @@ struct LightCost {
       }
       ApplyTransform(Tl_t, &extrinsics[6*s+0], Sx);
       ApplyTransform(Tl_t, &extrinsics[6*s+3], Sn);
+
       // Get the horizontal / vertical angles between the sensor and lighthouse
       // This might cause numerical instability
       switch (a) {
       case deepdive_ros::Motor::AXIS_HORIZONTAL:
-        residual[i] = atan2(Sx[1], Sx[2]) + T(measurement_.pulses[i].angle);
+        residual[i] = atan2(Sx[1], Sx[2]) - T(measurement_.pulses[i].angle);
+        //residual[2*i+1] = - T(measurement_.pulses[i].duration);
         break;
       case deepdive_ros::Motor::AXIS_VERTICAL:
         residual[i] = atan2(Sx[0], Sx[2]) - T(measurement_.pulses[i].angle);
+        //residual[2*i+1] = - T(measurement_.pulses[i].duration);
         break;
       default:
         ROS_WARN("Axis ID error");
@@ -313,14 +319,20 @@ void WorkerThread() {
     while (trackers_.size()) {
       deepdive_ros::Tracker & tracker = trackers_.front();
       std::string & serial = tracker.serial;
-      // ROS_INFO_STREAM("Adding tracker with serial " << serial);
+      // Get a transform that moves the photodiode position into the IMU frame
+      static double q[4], Tt_i[6], Ti_t[6], x[3];
+      Convert(tracker.imu_transform.rotation, q);
+      ceres::QuaternionToAngleAxis(q, &Tt_i[3]);
+      Convert(tracker.imu_transform.translation, Tt_i);
+      InvertTransform(Tt_i, Ti_t);
+      // Transform the position and normal of the sensor from the tracker frame
+      // into the IMU frame. This means that IMU measurements can be added into
+      // the graph in their raw form, if this is ever required.
       for (size_t i = 0; i < tracker.sensors.size(); i++) {
-        trackers[serial].extrinsics[6*i+0] = tracker.sensors[i].position.x;
-        trackers[serial].extrinsics[6*i+1] = tracker.sensors[i].position.y;
-        trackers[serial].extrinsics[6*i+2] = tracker.sensors[i].position.z;
-        trackers[serial].extrinsics[6*i+3] = tracker.sensors[i].normal.x;
-        trackers[serial].extrinsics[6*i+4] = tracker.sensors[i].normal.y;
-        trackers[serial].extrinsics[6*i+5] = tracker.sensors[i].normal.z;
+        Convert(tracker.sensors[i].position, x);
+        ApplyTransform(Ti_t, x, &trackers[serial].extrinsics[6*i+0]);
+        Convert(tracker.sensors[i].normal, x);
+        ApplyTransform(Ti_t, x, &trackers[serial].extrinsics[6*i+3]);
       }
       trackers_.pop();
     }
@@ -439,13 +451,8 @@ void WorkerThread() {
           ceres::AngleAxisToQuaternion(&it->second.Tb_w[3], q);
           ps.header.stamp = it->first;
           ps.header.frame_id = "world";
-          ps.pose.position.x = it->second.Tb_w[0];
-          ps.pose.position.y = it->second.Tb_w[1];
-          ps.pose.position.z = it->second.Tb_w[2];
-          ps.pose.orientation.w = q[0];
-          ps.pose.orientation.x = q[1];
-          ps.pose.orientation.y = q[2];
-          ps.pose.orientation.z = q[3];
+          Convert(it->second.Tb_w, ps.pose.position);
+          Convert(q, ps.pose.orientation);
           msg.poses.push_back(ps);
         }
         pub_trajectory_.publish(msg);
@@ -460,13 +467,8 @@ void WorkerThread() {
           static geometry_msgs::Pose pose;
           static double q[4];
           ceres::AngleAxisToQuaternion(&it->second.Tl_w[3], q);
-          pose.position.x = it->second.Tl_w[0];
-          pose.position.y = it->second.Tl_w[1];
-          pose.position.z = it->second.Tl_w[2];
-          pose.orientation.w = q[0];
-          pose.orientation.x = q[1];
-          pose.orientation.y = q[2];
-          pose.orientation.z = q[3];
+          Convert(it->second.Tl_w, pose.position);
+          Convert(q, pose.orientation);
           msg.poses.push_back(pose);
         }
         pub_stations_.publish(msg);

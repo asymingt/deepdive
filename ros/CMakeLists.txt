@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.5)
 project(deepdive_ros)
 
 # We will be using c++11 throughout our code
-add_definitions(-std=c++11)
+add_definitions(-std=c++14)
 
 # The ability to build external projects
 include(ExternalProject)
@@ -16,12 +16,15 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 ## EXTERNAL SOURCES
 
 # libukf - a C++ implementation of the unscented kalman filter
-# ExternalProject_Add(ukf
-#   GIT_REPOSITORY https://github.com/sfwa/ukf.git
-#   GIT_TAG master
-#   INSTALL_COMMAND "")
-# ExternalProject_Get_Property(ukf source_dir)
-# set(UKF_INCLUDE_DIRS ${source_dir}/include)
+ExternalProject_Add(ukf
+  GIT_REPOSITORY https://github.com/sfwa/ukf.git
+  GIT_TAG master
+  INSTALL_COMMAND "")
+ExternalProject_Get_Property(ukf source_dir)
+set(UKF_INCLUDE_DIRS ${source_dir}/include)
+
+# Find Eigen
+find_package(Eigen3 REQUIRED)
 
 # Non-linear least squares optimization (apt install libceres-dev)
 find_package(Ceres REQUIRED)
@@ -33,10 +36,11 @@ find_package(Deepdive REQUIRED)
 find_package(catkin_simple REQUIRED)
 
 # Setup the include directories
-include_directories(
+include_directories(src
   ${DEEPDIVE_INCLUDE_DIRS}
-#  ${UKF_INCLUDE_DIRS}
-  ${CERES_INCLUDE_DIRS})
+  ${UKF_INCLUDE_DIRS}
+  ${CERES_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS})
 
 ## THIS PROJECT
 
@@ -48,8 +52,10 @@ target_link_libraries(deepdive_bridge ${DEEPDIVE_LIBRARIES})
 cs_add_executable(deepdive_solver src/deepdive_solver.cc)
 target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
 
-#cs_add_executable(deepdive_filter src/deepdive_filter.cc)
-#add_dependencies(deepdive_filter ukf)
+cs_add_executable(deepdive_filter src/deepdive_filter.cc)
+add_dependencies(deepdive_filter ukf)
+target_compile_definitions(deepdive_filter
+  PRIVATE -DUKF_DOUBLE_PRECISION)
 
 cs_install()
 

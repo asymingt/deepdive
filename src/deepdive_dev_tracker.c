@@ -57,33 +57,15 @@ void deepdive_dev_tracker_imu(struct Tracker * tracker,
   const uint8_t *buf, int32_t len) {
   // Accelerometer (moved from imu-frame to tracker-frame)
   int16_t acc[3], gyr[3];
-#ifdef IMU_FRAME_TRACKER
-    acc[0] =  *((int16_t*)(buf+1));
-    acc[1] = -*((int16_t*)(buf+5));
-    acc[2] = -*((int16_t*)(buf+3));
-    gyr[0] = -*((int16_t*)(buf+7));
-    gyr[1] =  *((int16_t*)(buf+11));
-    gyr[2] =  *((int16_t*)(buf+9));
-#else
-    acc[0] = *((int16_t*)(buf+1));
-    acc[1] = *((int16_t*)(buf+3));
-    acc[2] = *((int16_t*)(buf+5));
-    gyr[0] = *((int16_t*)(buf+7));
-    gyr[1] = *((int16_t*)(buf+9));
-    gyr[2] = *((int16_t*)(buf+11));
-#endif
+  acc[0] = *((int16_t*)(buf+1));
+  acc[1] = *((int16_t*)(buf+3));
+  acc[2] = *((int16_t*)(buf+5));
+  gyr[0] = *((int16_t*)(buf+7));
+  gyr[1] = *((int16_t*)(buf+9));
+  gyr[2] = *((int16_t*)(buf+11));
   // Timecode is wrapping milliseconds
   uint32_t timecode = *((uint32_t*)(buf+13));
   // Process the data
-  /*
-  printf("[%u] ", timecode);
-  for (size_t i = 1; i < 12; i+=2)
-    printf("%06d\t", *((int16_t*)(buf+i)));
-  printf(" :: ");
-  for (size_t i = 17; i < 24; i+=2)
-    printf("%06u\t", *((uint16_t*)(buf+i)));
-  printf("\n");
-  */
   deepdive_data_imu(tracker, timecode, acc, gyr, NULL);
 }
 

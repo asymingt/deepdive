@@ -47,6 +47,19 @@ Things I'd like to to:
      data. @nairol has produced a great video explaining what these
      parameters might mean: https://www.youtube.com/watch?v=iVg9_21fcE8
 
+# Some information about reference frames
+
+The constellation of photodiodes on a tracker or controller have positions
+(extrinsics) that are expressed in the "tracking reference frame". These
+positions are encoded in a gzipped JSON file, along with one static transform
+that expresses the "IMU" frame in the tracking frame, and another that
+expresses the "head" frame in the tracking frame. The head frame is the
+centering bolt on the tracker, or the center of the ring on the controller.
+
+To simplify the mathematical expressions, this code performs all tracking in
+the IMU frame. Only when it is queried is the solution transformed to the
+"head" frame, which is presumably the one that can be mechanically referenced.
+
 # Copying (MIT licence)
 
 This code was originally forked from libsurvive, an incredible library

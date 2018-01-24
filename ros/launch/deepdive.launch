@@ -4,21 +4,32 @@
   <arg name="replay" default="" />
   <arg name="record" default="" />
   <arg name="rviz" default="true" />
+  <arg name="output" default="log" />
   <!-- Data recorded, if needed -->
-  <node if="$(eval arg('record') != '')" name="deepdive_recorder"
+  <node if="$(eval arg('record') != '')" name="deepdive_recorder" output="$(arg output)"
         pkg="rosbag" type="record" args="-O $(arg record) -a"/>
   <!-- Bridge or bag replay, depending on arguments -->
-  <node if="$(eval arg('replay') != '')" name="deepdive_player"
+  <node if="$(eval arg('replay') != '')" name="deepdive_player" output="$(arg output)"
         pkg="rosbag" type="play" args="--clock $(arg replay)"/>
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
         pkg="deepdive_ros" type="deepdive_bridge"/>
+  <!-- TEMPORaRY -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="lighthous_tf2"
+      args="0 0 0 0 0 0 1 world 2583881017" />
+  <!-- One filter for each tracker in the system -->
+  <node name="deepdive_filter_port" output="$(arg output)"
+        pkg="deepdive_ros" type="deepdive_filter">
+    <rosparam command="load" file="$(find deepdive_ros)/cfg/tracker-dev.yaml" />
+  </node>
   <!-- Each rigid cluster needs a solver -->
+  <!--
   <node if="$(eval arg('target') != '')" name="deepdive_solver"
         pkg="deepdive_ros" type="deepdive_solver" output="screen">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/$(arg target).yaml" />
   </node>
+  -->
   <!-- Visualization -->
   <node if="$(arg rviz)" name="deepdive_rviz"
         pkg="rviz" type="rviz"  respawn="true"
-        args="-d $(find deepdive_ros)/cfg/gui.rviz"/>
+        args="-d $(find deepdive_ros)/rviz/deepdive.rviz"/>
 </launch>

@@ -1,0 +1,25 @@
+serial: "LHR-08DDBC05"
+frame: "port"
+gravity: [0 0 -9.80665]
+rate: 120
+estimate:
+  position: [0 0 0]
+  attitude: [0 0 0 1]
+  velocity: [0 0 0]
+  acceleration: [0 0 0]
+  omega: [0 0 0]
+  alpha: [0 0 0]
+  gyro_bias: [0 0 0]
+  accel_bias: [0 0 0]
+covariance:
+  position: [0 0 0]
+  attitude: [0 0 0]
+  velocity: [0 0 0]
+  acceleration: [0 0 0]
+  omega: [0 0 0]
+  alpha: [0 0 0]
+  gyro_bias: [0 0 0]
+  accel_bias: [0 0 0]
+noise:
+  gyro_bias: [0 0 0]
+  accel_bias: [0 0 0]
