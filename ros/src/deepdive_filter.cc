@@ -35,36 +35,22 @@
 // State indexes
 enum StateElement {
   Position,               // Position (world frame, m)
-  Attitude,               // Attitude as a quaternion (world to body frame)
-  Velocity,               // Velocity (world frame, m/s)
-  Acceleration,           // Acceleration (body frame, m/s^2)
-  Omega,                  // Angular velocity (body frame, rad/s)
-  Alpha,                  // Angular acceleration (body frame, rad/s^2)
-  GyroBias                // Gyro bias (body frame, rad/s)
+  Attitude
 };
 
 // State vector
 using State = UKF::StateVector<
   UKF::Field<Position, UKF::Vector<3>>,
-  UKF::Field<Attitude, UKF::Quaternion>,
-  UKF::Field<Velocity, UKF::Vector<3>>,
-  UKF::Field<Acceleration, UKF::Vector<3>>,
-  UKF::Field<Omega, UKF::Vector<3>>,
-  UKF::Field<Alpha, UKF::Vector<3>>,
-  UKF::Field<GyroBias, UKF::Vector<3>>
+  UKF::Field<Attitude, UKF::Quaternion>
 >;
 
 // Measurement indices
 enum MeasurementElement {
-  Accelerometer,         // Acceleration (body frame, m/s^2)
-  Gyroscope,             // Gyroscope (body frame, rads/s)
   Angle                  // Angle between lighthouse and sensor (radians)
 };
 
 // Measurement vector
-using Measurement = UKF::DynamicMeasurementVector<
-  UKF::Field<Accelerometer, UKF::Vector<3>>,
-  UKF::Field<Gyroscope, UKF::Vector<3>>,
+using Measurement = UKF::FixedMeasurementVector<
   UKF::Field<Angle, real_t>
 >;
 
@@ -80,9 +66,8 @@ struct Tracker {
   std::string frame;                            // Frame
   // Filter internals
   Filter filter;                                // UKF
-  Measurement measurement;                      // Measurement
   // Cached measurements
-  std::vector<deepdive_ros::Pulse> pulses;      // Light pulses
+  deepdive_ros::Light measurement;              // Light pulses
   // World data
   UKF::Vector<3> gravity;                       // Gravity vector
   // Calibration data (read from the tracker)
@@ -97,8 +82,6 @@ struct Tracker {
   UKF::Vector<3> hTt;                           // Translation: Tracker -> IMU
   UKF::Quaternion hRt;                          // Rotation: Tracker -> HEAD
   // Interation information
-  size_t sensor = 0;                            // Current sensor
-  size_t axis = 0;                              // Current axis
   bool initialized = false;                     // Wait for light data
 };
 
@@ -113,46 +96,23 @@ namespace UKF {
 template <> template <>
 State State::derivative<>() const {
   State output;
-  output.set_field<Position>(get_field<Velocity>());
-  output.set_field<Velocity>(
-    get_field<Attitude>().conjugate() * get_field<Acceleration>());
-  output.set_field<Acceleration>(UKF::Vector<3>(0, 0, 0));
-  UKF::Quaternion omega_q;
-  omega_q.vec() = get_field<Omega>() * 0.5;
-  omega_q.w() = 0;
-  output.set_field<Attitude>(omega_q.conjugate() * get_field<Attitude>());
-  output.set_field<Omega>(get_field<Alpha>());
-  output.set_field<Alpha>(UKF::Vector<3>(0, 0, 0));
-  output.set_field<GyroBias>(UKF::Vector<3>(0, 0, 0));
+  output.set_field<Position>(UKF::Vector<3>(0, 0, 0));
+  output.set_field<Attitude>(UKF::Vector<3>(0, 0, 0));
   return output;
 }
 
 template <> template <>
-UKF::Vector<3> Measurement::expected_measurement
-  <State, Accelerometer>(const State& state) {
-    return state.get_field<Acceleration>()
-      + state.get_field<Attitude>() * tracker_.gravity;
-}
-
-template <> template <>
-UKF::Vector<3> Measurement::expected_measurement
-  <State, Gyroscope>(const State& state) {
-    return state.get_field<Omega>() + state.get_field<GyroBias>();
-}
-
-template <> template <>
 real_t Measurement::expected_measurement
-  <State, Angle>(const State& s) {
-    UKF::Vector<3> x = tracker_.extrinsics[tracker_.sensor];
-    x = tracker_.iRt.conjugate() * x - tracker_.iTt;
-    x = s.get_field<Attitude>().conjugate() * x - s.get_field<Position>();
-    return atan2(x[tracker_.axis], x[2]);
+  <State, Angle>(State const& s, UKF::Vector<3> const& x, uint8_t const& axis) {
+    UKF::Vector<3> y = s.get_field<Attitude>().conjugate() * x
+                     + s.get_field<Position>();
+    return (axis ? -atan2(y[1], y[2]) : atan2(y[0], y[2]));
 }
 
+// The angle error is about 1mm over 10m, therefore tan(1/100)^2 = 1e-08
 template <>
 Measurement::CovarianceVector Measurement::measurement_covariance(
-  (Measurement::CovarianceVector() << 
-    1.0, 1.0, 1.0, 0.01, 0.01, 0.01, 1.0e-08).finished());
+  (Measurement::CovarianceVector() << 1.0e-8).finished());
 }
 
 // ROS CALLBACKS
@@ -183,19 +143,18 @@ void TimerCallback(ros::TimerEvent const& info) {
     return;
   // Get the filter from the tracker information
   Filter & filter = tracker_.filter;
-  // Step the filter forward
+  // A priori step
   filter.a_priori_step(dt);
-  filter.innovation_step(tracker_.measurement);
-  for (size_t i = 0; i < tracker_.pulses.size(); i++) {
-    tracker_.measurement = Measurement();
-    tracker_.sensor = tracker_.pulses[i].sensor;
-    tracker_.measurement.set_field<Angle>(tracker_.pulses[i].angle);
-    filter.innovation_step(tracker_.measurement);
+  // Apply angle corrections
+  for (size_t i = 0; i < tracker_.measurement.pulses.size(); i++) {
+    Measurement measurement;
+    measurement.set_field<Angle>(tracker_.measurement.pulses[i].angle);
+    filter.innovation_step(measurement,
+      tracker_.extrinsics[tracker_.measurement.pulses[i].sensor],
+      tracker_.measurement.axis);
   }
-  tracker_.pulses.clear();
   filter.a_posteriori_step();
-  // Clear the measurements
-  tracker_.measurement = Measurement();
+  tracker_.measurement.pulses.clear();
   // Broadcast the tracker pose
   static tf2_ros::TransformBroadcaster br;
   static geometry_msgs::TransformStamped tf;
@@ -209,32 +168,14 @@ void TimerCallback(ros::TimerEvent const& info) {
   tf.transform.rotation.x = filter.state.get_field<Attitude>().x();
   tf.transform.rotation.y = filter.state.get_field<Attitude>().y();
   tf.transform.rotation.z = filter.state.get_field<Attitude>().z();
-  ROS_INFO_STREAM(tf);
   br.sendTransform(tf);
-}
-
-// This will be called at approximately 250Hz * NUM_TRACKERS
-void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
-  // Ignore data from other trackers
-  if (msg->header.frame_id != tracker_.serial)
-    return;
-  // Add the calibrated
-  tracker_.measurement.set_field<Accelerometer>(UKF::Vector<3>(
-    msg->linear_acceleration.x * tracker_.as[0] + tracker_.ab[0],
-    msg->linear_acceleration.y * tracker_.as[1] + tracker_.ab[1],
-    msg->linear_acceleration.z * tracker_.as[2] + tracker_.ab[2]));
-  tracker_.measurement.set_field<Gyroscope>(UKF::Vector<3>(
-    msg->angular_velocity.x * tracker_.gs[0] + tracker_.gb[0],
-    msg->angular_velocity.y * tracker_.gs[1] + tracker_.gb[1],
-    msg->angular_velocity.z * tracker_.gs[2] + tracker_.gb[2]));
 }
 
 // This will be called at approximately 120Hz
 // - Single lighthouse in 'A' mode : 120Hz (60Hz per axis)
 // - Dual lighthouses in b/A or b/c modes : 120Hz (30Hz per axis)
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
-  tracker_.axis = msg->axis;
-  tracker_.pulses = msg->pulses;
+  tracker_.measurement = *msg;
   tracker_.initialized = true;
 }
 
@@ -384,29 +325,14 @@ int main(int argc, char **argv) {
   Filter & filter = tracker_.filter;
   filter.state.set_field<Position>(est_position);
   filter.state.set_field<Attitude>(est_attitude);
-  filter.state.set_field<Velocity>(est_velocity);
-  filter.state.set_field<Acceleration>(est_acceleration);
-  filter.state.set_field<Omega>(est_omega);
-  filter.state.set_field<Alpha>(est_alpha);
-  filter.state.set_field<GyroBias>(est_gyro_bias);
   filter.covariance = State::CovarianceMatrix::Zero();
   filter.covariance.diagonal() <<
     cov_position[0], cov_position[1], cov_position[2],
-    cov_attitude[0], cov_attitude[1], cov_attitude[2],
-    cov_velocity[0], cov_velocity[1], cov_velocity[2],
-    cov_accel[0], cov_accel[1], cov_accel[2],
-    cov_omega[0], cov_omega[1], cov_omega[2],
-    cov_alpha[0], cov_alpha[1], cov_alpha[2],
-    cov_gyro_bias[0], cov_gyro_bias[1], cov_gyro_bias[2];
+    cov_attitude[0], cov_attitude[1], cov_attitude[2];
   filter.process_noise_covariance = State::CovarianceMatrix::Zero();
   filter.process_noise_covariance.diagonal() <<
     noise_position[0], noise_position[1], noise_position[2],
-    noise_attitude[0], noise_attitude[1], noise_attitude[2],
-    noise_velocity[0], noise_velocity[1], noise_velocity[2],
-    noise_accel[0], noise_accel[1], noise_accel[2],
-    noise_omega[0], noise_omega[1], noise_omega[2],
-    noise_alpha[0], noise_alpha[1], noise_alpha[2],
-    noise_gyro_bias[0], noise_gyro_bias[1], noise_gyro_bias[2];
+    noise_attitude[0], noise_attitude[1], noise_attitude[2];
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(
@@ -415,8 +341,6 @@ int main(int argc, char **argv) {
   // Subscribe to the motion and light callbacks
   ros::Subscriber sub_tracker  =
     nh.subscribe("/trackers", 10, TrackerCallback);
-  ros::Subscriber sub_imu =
-    nh.subscribe("/imu", 10, ImuCallback);
   ros::Subscriber sub_light =
     nh.subscribe("/light", 10, LightCallback);
 

@@ -185,11 +185,11 @@ struct LightCost {
       // This might cause numerical instability
       switch (a) {
       case deepdive_ros::Motor::AXIS_HORIZONTAL:
-        residual[i] = atan2(Sx[1], Sx[2]) - T(measurement_.pulses[i].angle);
+        residual[i] =  atan2(Sx[1], Sx[2]) - T(measurement_.pulses[i].angle);
         //residual[2*i+1] = - T(measurement_.pulses[i].duration);
         break;
       case deepdive_ros::Motor::AXIS_VERTICAL:
-        residual[i] = atan2(Sx[0], Sx[2]) - T(measurement_.pulses[i].angle);
+        residual[i] = -atan2(Sx[0], Sx[2]) - T(measurement_.pulses[i].angle);
         //residual[2*i+1] = - T(measurement_.pulses[i].duration);
         break;
       default:
