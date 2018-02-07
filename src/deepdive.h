@@ -250,18 +250,18 @@ struct Driver {
 struct Driver * deepdive_init();
 
 // Register a light callback function
-void deepdive_install_lig_fn(struct Driver * drv, lig_func fbp);
+void deepdive_install_light_fn(struct Driver * drv, lig_func fbp);
 
 // Register an IMU callback function
 void deepdive_install_imu_fn(struct Driver * drv, imu_func fbp);
 
-// Register an button callback function
-void deepdive_install_but_fn(struct Driver * drv, but_func fbp);
+// Register a button callback function
+void deepdive_install_button_fn(struct Driver * drv, but_func fbp);
 
-// Register an button callback function
+// Register a tracker callback function
 void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp);
 
-// Register an button callback function
+// Register a lighthouse callback function
 void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp);
 
 // Get the general configuration data

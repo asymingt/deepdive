@@ -223,9 +223,9 @@ int main(int argc, char **argv) {
   }
 
   // Install the callbacks
-  deepdive_install_lig_fn(driver, LightCallback);
+  deepdive_install_light_fn(driver, LightCallback);
   deepdive_install_imu_fn(driver, ImuCallback);
-  deepdive_install_but_fn(driver, ButtonCallback);
+  deepdive_install_button_fn(driver, ButtonCallback);
   deepdive_install_lighthouse_fn(driver, LighthouseCallback);
   deepdive_install_tracker_fn(driver, TrackerCallback);
 

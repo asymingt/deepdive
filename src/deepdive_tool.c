@@ -65,7 +65,7 @@ void my_imu_process(struct Tracker * tracker, uint32_t timecode,
 }
 
 // Callback to display button info
-void my_but_process(struct Tracker * tracker,
+void my_button_process(struct Tracker * tracker,
   uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical) {
   if (mask & BUTTON_TRIGGER)
     printf("[EVENT] TRIGGER_CLICK\n");
@@ -89,9 +89,9 @@ int main() {
     return 1;
   }
   // Install callbacks
-  deepdive_install_lig_fn(drv, my_light_process);
   deepdive_install_imu_fn(drv, my_imu_process);
-  deepdive_install_but_fn(drv, my_but_process);
+  deepdive_install_light_fn(drv, my_light_process);
+  deepdive_install_button_fn(drv, my_button_process);
   // Keep going until ctrl+c
   while(deepdive_poll(drv) == 0) {}
     return 0;
