@@ -1,5 +1,8 @@
 serial: "LHR-09DF88FD"
 frame: "dev"
+topics:
+  pose:  "/loc/truth"
+  twist: "/loc/twist"
 gravity:          [0.0, 0.0, -9.80665]
 rate: 128
 initial_estimate:

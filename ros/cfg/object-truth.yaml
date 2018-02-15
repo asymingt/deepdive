@@ -2,7 +2,6 @@
 topics:
   pose:  "/loc/pose"
   twist: "/loc/twist"
-  accel: "/loc/accel"
 
 # Send pose estimates using this TF2 frame name
 frame: "truth"
@@ -24,7 +23,6 @@ lighthouses:
 # We assume that twist is zero on initialization.
 intial_position: [0 0 0]
 intial_attitude: [0 0 0 1]
-gravity: [0 0 9.80665]
 
 # By default we solve for the pose of the body frame
 # as a function of time, as well as the lighthouse

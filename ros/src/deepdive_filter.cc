@@ -11,6 +11,9 @@
 
 // General messages
 #include <visualization_msgs/MarkerArray.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/TwistStamped.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <sensor_msgs/Imu.h>
 #include <deepdive_ros/Trackers.h>
 #include <deepdive_ros/Light.h>
@@ -90,7 +93,9 @@ UKF::Vector<3> acc_s_;                              // Accel scale / cross-coupl
 UKF::Vector<3> acc_b_;                              // Accel bias
 bool ready_ = false;                                // Parameters received
 bool initialized_ = false;                          // One light measurement
-ros::Publisher pub_;                                // Vidualization publisher
+ros::Publisher pub_markers_;                        // Visualization publisher
+ros::Publisher pub_pose_;                           // Pose publisher
+ros::Publisher pub_twist_;                          // Twist publisher
 
 namespace UKF {
 
@@ -137,15 +142,15 @@ real_t Measurement::expected_measurement
     // Position of the sensor in the lighthouse frame
     x = lTw_[l].inverse() * x;
     // Get the angles in X and Y
-    static real_t angles[2];
-    angles[0] =  atan2(x[0], x[2]);
-    angles[1] = -atan2(x[1], x[2]);
+    UKF::Vector<2> angles;
+    angles[0] =  std::atan2(x[0], x[2]);
+    angles[1] = -std::atan2(x[1], x[2]);
     // Apply the corrections
-    // deepdive_ros::Motor & motor = cal_[l][a];
-    // angles[a] += motor.phase;
-    // angles[a] += motor.tilt * angles[1-a];
-    // angles[a] += motor.curve * angles[1-a] * angles[1-a];
-    // angles[a] += motor.gibmag * cos(angles[1-a] + motor.gibphase);
+    deepdive_ros::Motor & motor = cal_[l][a];
+    angles[a] += motor.phase;
+    angles[a] += motor.tilt * angles[1-a];
+    angles[a] += motor.curve * angles[1-a] * angles[1-a];
+    angles[a] += motor.gibmag * std::cos(angles[1-a] + motor.gibphase);
     // Vertical or horizontal angle
     return angles[a];
 }
@@ -206,14 +211,14 @@ void TimerCallback(ros::TimerEvent const& info) {
   iTw.linear() =
     filter_.state.get_field<Attitude>().toRotationMatrix();
   tTw = iTt_.inverse() * iTw;
-
-  // Convert rotational component to a quaternion
   Eigen::Quaterniond q(tTw.linear());
 
-  // Broadcast the tracker pose
+  // Calculate omega
+
+  // Broadcast the tracker pose on TF2
   static tf2_ros::TransformBroadcaster br;
   static geometry_msgs::TransformStamped tf;
-  tf.header.stamp = info.current_real;
+  tf.header.stamp = ros::Time::now();
   tf.header.frame_id = "world";
   tf.child_frame_id = frame_;
   tf.transform.translation.x = tTw.translation()[0];
@@ -225,13 +230,36 @@ void TimerCallback(ros::TimerEvent const& info) {
   tf.transform.rotation.z = q.z();
   br.sendTransform(tf);
 
+  // Broadcast the pose (world -> body transform)
+  static geometry_msgs::PoseStamped pose;
+  pose.header = tf.header;
+  pose.pose.position.x = tTw.translation()[0];
+  pose.pose.position.y = tTw.translation()[1];
+  pose.pose.position.z = tTw.translation()[2];
+  pose.pose.orientation.w = q.w();
+  pose.pose.orientation.x = q.x();
+  pose.pose.orientation.y = q.y();
+  pose.pose.orientation.z = q.z();
+  pub_pose_.publish(pose);
+
+  // Broadcast the twist (in the world frame)
+  // static geometry_msgs::TwistStamped twist;
+  // twist.header = tf.header;
+  // twist.twist.linear.x = tTw.translation()[0];
+  // twist.twist.linear.y = tTw.translation()[1];
+  // twist.twist.linear.z = tTw.translation()[2];
+  // twist.twist.angular.x = q.x();
+  // twist.twist.angular.y = q.y();
+  // twist.twist.angular.z = q.z();
+  // pub_pose_.publish(pose);
+
   // Publish the static markers
   visualization_msgs::MarkerArray msg;
   msg.markers.resize(extrinsics_.size());
   for (uint16_t i = 0; i < extrinsics_.size(); i++) {
     visualization_msgs::Marker & marker = msg.markers[i];
     marker.header.frame_id = frame_;
-    marker.header.stamp = ros::Time();
+    marker.header.stamp = ros::Time::now();
     marker.ns = "deepdive";
     marker.id = i;
     marker.type = visualization_msgs::Marker::SPHERE;
@@ -251,7 +279,7 @@ void TimerCallback(ros::TimerEvent const& info) {
     marker.color.g = 0.0;
     marker.color.b = 0.0;
   }
-  pub_.publish(msg);
+  pub_markers_.publish(msg);
 }
 
 // This will be called at approximately 120Hz
@@ -440,6 +468,13 @@ int main(int argc, char **argv) {
   if (!GetVectorParam(nh, "gravity", gravity_))
     ROS_FATAL("Failed to get gravity parameter.");
 
+  // Get the topics for publishing
+  std::string topic_pose, topic_twist;
+  if (!nh.getParam("topics/pose", topic_pose))
+    ROS_FATAL("Failed to get topics/pose parameter.");
+  if (!nh.getParam("topics/twist", topic_twist))
+    ROS_FATAL("Failed to get topics/twist parameter.");  
+
   // Get the tracker update rate. Anything over the IMU rate is really not
   // adding much, since we don't have a good dynamics model.
   double rate = 100;
@@ -545,8 +580,10 @@ int main(int argc, char **argv) {
   ros::Subscriber sub_light =
     nh.subscribe("/light", 10, LightCallback);
 
-  // Latched markers showing sensor positions
-  pub_ = nh.advertise<visualization_msgs::MarkerArray>("/sensors", 0);
+  // Markers showing sensor positions
+  pub_markers_ = nh.advertise<visualization_msgs::MarkerArray>("/sensors", 0);
+  pub_pose_ = nh.advertise<geometry_msgs::PoseStamped>(topic_pose, 0);
+  pub_twist_ = nh.advertise<geometry_msgs::TwistStamped>(topic_twist, 0);
 
   // Block until safe shutdown
   ros::spin();
