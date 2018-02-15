@@ -7,8 +7,6 @@ Panels:
         - /Global Options1
         - /Path1/Offset1
         - /TF1/Frames1
-        - /TF1/Frames1/world1
-        - /Axes1
       Splitter Ratio: 0.5
     Tree Height: 598
   - Class: rviz/Selection
@@ -101,6 +99,10 @@ Visualization Manager:
         All Enabled: false
         dev:
           Value: true
+        dev/head:
+          Value: true
+        dev/imu:
+          Value: true
         world:
           Value: false
       Marker Scale: 1
@@ -115,7 +117,10 @@ Visualization Manager:
           907388239:
             {}
           dev:
-            {}
+            dev/head:
+              {}
+            dev/imu:
+              {}
       Update Interval: 0
       Value: true
     - Class: rviz/Axes
@@ -124,6 +129,14 @@ Visualization Manager:
       Name: Axes
       Radius: 0.00999999978
       Reference Frame: world
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /sensors
+      Name: MarkerArray
+      Namespaces:
+        deepdive: true
+      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:
@@ -150,7 +163,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 3.32087708
+      Distance: 4.75116253
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
@@ -165,10 +178,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.465398371
+      Pitch: 0.930397868
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 5.33043194
+      Yaw: 5.61043453
     Saved: ~
 Window Geometry:
   Displays:

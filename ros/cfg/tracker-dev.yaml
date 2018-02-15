@@ -10,7 +10,7 @@ initial_estimate:
   omega:          [0, 0, 0]
   gyro_bias:      [0, 0, 0]
 initial_covariance:
-  position:       [1, 1, 1]
+  position:       [10, 10, 10]
   attitude:       [10, 10, 10]
   velocity:       [1.0e-06, 1.0e-06, 1.0e-06]
   acceleration:   [1.0e-06, 1.0e-06, 1.0e-06]
