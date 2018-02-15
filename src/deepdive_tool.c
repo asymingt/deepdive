@@ -83,15 +83,88 @@ void my_button_process(struct Tracker * tracker,
     printf("[EVENT] TRIGGER - %hu\n", trigger);
 }
 
+// Called when tracker information is pulled
+void my_tracker_process(struct Tracker * t) {
+  if (!t) return;
+  // Sensor
+  printf("Metadata received for tracker with serial %s\n", t->serial);
+  printf("- Photosensor positions\n");
+  for (uint32_t i = 0; i < t->cal.num_channels; i++) {
+    printf("  (SENSOR %u)\n", i);
+    printf("    [POS] x = %f y = %f z = %f\n",
+      t->cal.positions[i][0], t->cal.positions[i][1], t->cal.positions[i][2]);
+    printf("    [NML] x = %f y = %f z = %f\n",
+      t->cal.normals[i][0], t->cal.normals[i][1], t->cal.normals[i][2]);
+  }
+  // IMU calibration
+  printf("- IMU calibration parameters:\n");
+  printf("  (GYR B) x = %f y = %f z = %f\n",
+    t->cal.gyr_bias[0], 
+    t->cal.gyr_bias[1],
+    t->cal.gyr_bias[2]);
+  printf("  (GYR S) x = %f y = %f z = %f\n",
+    t->cal.gyr_scale[0], 
+    t->cal.gyr_scale[1],
+    t->cal.gyr_scale[2]);
+  printf("  (ACC B) x = %f y = %f z = %f\n",
+    t->cal.acc_bias[0], 
+    t->cal.acc_bias[1],
+    t->cal.acc_bias[2]);
+  printf("  (ACC S) x = %f y = %f z = %f\n",
+    t->cal.acc_scale[0], 
+    t->cal.acc_scale[1],
+    t->cal.acc_scale[2]);
+  // Transforms
+  printf("- Transform for SENSOR -> IMU:\n");
+  printf("  (ROT) w = %f  x = %f y = %f z = %f\n",
+    t->cal.imu_transform[0],
+    t->cal.imu_transform[1],
+    t->cal.imu_transform[2],
+    t->cal.imu_transform[3]);  
+  printf("  (POS) x = %f y = %f z = %f\n",
+    t->cal.imu_transform[4],
+    t->cal.imu_transform[5],
+    t->cal.imu_transform[6]);
+  printf("- Transform for SENSOR -> TRACKER:\n");
+  printf("  (ROT) w = %f  x = %f y = %f z = %f\n",
+    t->cal.head_transform[0],
+    t->cal.head_transform[1],
+    t->cal.head_transform[2],
+    t->cal.head_transform[3]);
+  printf("  (POS) x = %f y = %f z = %f\n",
+    t->cal.head_transform[4],
+    t->cal.head_transform[5],
+    t->cal.head_transform[6]);
+}
+
+// Called when OOTX data is decoded from this lighthouse
+void my_lighthouse_process(struct Lighthouse *l) {
+  if (!l) return;
+  // Sensor
+  printf("Metadata received for lighthouse with serial  %s\n", l->serial);
+  for (uint32_t i = 0; i < MAX_NUM_MOTORS; i++) {
+    printf("- Motor %u calibration\n", i);
+    printf("  (PHASE) %f\n", l->motors[i].phase);
+    printf("  (TILT) %f\n", l->motors[i].tilt);
+    printf("  (GIBPHASE) %f\n", l->motors[i].gibphase);
+    printf("  (GIBMAG) %f\n", l->motors[i].gibmag);
+    printf("  (CURVE) %f\n", l->motors[i].curve);
+  }
+  printf("- Accel x = %f y = %f z = %f\n",
+    l->accel[0], l->accel[1], l->accel[2]);
+}
+
 // Main entry point for application
 int main(int argc, char **argv) {
   // Get commandline arguments
-  struct arg_lit  *imu     = arg_lit0("i", NULL, "print imu");
-  struct arg_lit  *light   = arg_lit0("l", NULL, "print light");
-  struct arg_lit  *button  = arg_lit0("b", NULL, "print buttons");
+  struct arg_lit  *imu     = arg_lit0("i", "imu", "print imu");
+  struct arg_lit  *light   = arg_lit0("l", "light", "print light");
+  struct arg_lit  *button  = arg_lit0("b", "button", "print buttons");
+  struct arg_lit  *lh      = arg_lit0("h", "lh", "print lighthouse info");
+  struct arg_lit  *tracker = arg_lit0("t", "tracker", "print tracker info");
   struct arg_lit  *help    = arg_lit0(NULL, "help", "print this help and exit");
   struct arg_end  *end     = arg_end(20);
-  void* argtable[] = {imu, light, button, help, end};
+  void* argtable[] = {imu, light, button, tracker, lh, help, end};
   // Verify we allocated correcty
   const char* progname = "deepdive_tool";
   int nerrors, exitcode = 0;
@@ -133,6 +206,10 @@ int main(int argc, char **argv) {
     deepdive_install_light_fn(drv, my_light_process);
   if (button->count > 0)
     deepdive_install_button_fn(drv, my_button_process);
+  if (lh->count > 0)
+    deepdive_install_lighthouse_fn(drv, my_lighthouse_process);
+  if (tracker->count > 0)
+    deepdive_install_tracker_fn(drv, my_tracker_process);
   // Keep going until ctrl+c
   while(deepdive_poll(drv) == 0) {}
     return 0;
