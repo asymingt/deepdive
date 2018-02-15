@@ -358,6 +358,8 @@ int deepdive_usb_init(struct Driver * drv) {
      ///////////////////////////////
      // USB TRACKER OR CONTROLLER //
      ///////////////////////////////
+     default:
+      continue;
      case USB_PROD_CONTROLLER:
      case USB_PROD_TRACKER:
       // Endpoint for IMU
