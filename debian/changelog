@@ -1,5 +1,5 @@
-libdeepdive (0.1-1) unstable; urgency=medium
+libdeepdive (0.2-1) unstable; urgency=medium
 
-  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+  * Bumped to version 2 of the code, which adds a ROS hihg-level solver.
 
  -- Andrew Symington <nospam@nospam.org>  Tue, 9 Jan 2018 13:00:00 -0700

@@ -1,7 +1,7 @@
 Source: libdeepdive
 Priority: optional
 Maintainer: Andrew Symington <nospam@nospam.org>
-Build-Depends: debhelper (>=9), cmake (>=3.5), zlib1g-dev (>=1.2.8), libjson0-dev (>=0.11), libusb-1.0-0-dev (>=1.0.20)
+Build-Depends: debhelper (>=9), cmake (>=3.5), zlib1g-dev (>=1.2.8), libjson0-dev (>=0.11), libusb-1.0-0-dev (>=1.0.20), libargtable2-0 (>=12)
 Standards-Version: 3.9.6
 Section: libs
 Homepage: https://github.com/asymingt/libdeepdive
@@ -14,6 +14,12 @@ Description: Development headers for pulling raw data from Vive Trackers.
  These headers provide a mechanism for pulling data from Vive Trackers, plugged
  into USB or wirelessly using a Steam Watchman adapter. Multiple trackers and
  up to two base stations are supported. The project is based on libsurvive.
+
+Package: libdeepdive-tools
+Section: devel
+Architecture: any
+Depends: libdeepdive0, libargtable2-0 (>=12) ${misc:Depends}
+Description: Binary command line tools for pulling raw data from Vive Trackers.
 
 Package: libdeepdive0
 Architecture: any

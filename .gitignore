@@ -2,6 +2,7 @@
 *.sublime-workspace
 /obj-x86_64-linux-gnu/
 /debian/libdeepdive-dev/
+/debian/libdeepdive-tools/
 /debian/libdeepdive0/
 /debian/tmp/
 /debian/*.log
