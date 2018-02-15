@@ -13,6 +13,10 @@ find_library(LIBUSB_LIBRARY NAMES usb-1.0 PATH_SUFFIXES "lib" "lib32" "lib64")
 find_path(LIBJSON_INCLUDE_DIR NAMES json.h PATH_SUFFIXES "include" "json")
 find_library(LIBJSON_LIBRARY NAMES json PATH_SUFFIXES "lib" "lib32" "lib64")
 
+# argtable2 is for argument parsing of the commandline
+find_path(ARGTABLE2_INCLUDE_DIRS argtable2.h PATH_SUFFIXES "include")
+find_library(ARGTABLE2_LIBRARY argtable2 PATH_SUFFIXES "lib") 
+
 # Zlib is required to decompress tracker configuration
 find_package(ZLIB)
 
@@ -20,7 +24,8 @@ find_package(ZLIB)
 include_directories(src
   ${LIBJSON_INCLUDE_DIR}
   ${LIBUSB_INCLUDE_DIR}
-  ${ZLIB_INCLUDE_DIRS})
+  ${ZLIB_INCLUDE_DIRS}
+  ${ARGTABLE2_INCLUDE_DIRS})
 
 # Core library does the heavy-lifting
 add_library(deepdive SHARED
@@ -43,7 +48,8 @@ set_target_properties(deepdive PROPERTIES
 add_executable(deepdive_tool
   src/deepdive_tool.c)
 target_link_libraries(deepdive_tool
-  deepdive)
+  deepdive
+  ${ARGTABLE2_LIBRARY})
 
 # Create an uninstall script for covenience
 configure_file(cmake/deepdiveUninstall.cmake.in

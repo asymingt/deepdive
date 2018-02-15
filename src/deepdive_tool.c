@@ -31,6 +31,8 @@
   SOFTWARE.
 */
 
+#include <argtable2.h>
+
 #include <deepdive.h>
 
 // Callback to display light info
@@ -81,19 +83,63 @@ void my_button_process(struct Tracker * tracker,
     printf("[EVENT] TRIGGER - %hu\n", trigger);
 }
 
-int main() {
+// Main entry point for application
+int main(int argc, char **argv) {
+  // Get commandline arguments
+  struct arg_lit  *imu     = arg_lit0("i", NULL, "print imu");
+  struct arg_lit  *light   = arg_lit0("l", NULL, "print light");
+  struct arg_lit  *button  = arg_lit0("b", NULL, "print buttons");
+  struct arg_lit  *help    = arg_lit0(NULL, "help", "print this help and exit");
+  struct arg_end  *end     = arg_end(20);
+  void* argtable[] = {imu, light, button, help, end};
+  // Verify we allocated correcty
+  const char* progname = "deepdive_tool";
+  int nerrors, exitcode = 0;
+  if (arg_nullcheck(argtable) != 0) {
+    printf("%s: insufficient memory\n", progname);
+    exitcode = 1;
+    goto exit;
+  }
+  // Parse the arguments
+  nerrors = arg_parse(argc, argv, argtable);
+  // Help takes precedence
+  if (help->count > 0) {
+    printf("Usage: %s", progname);
+    arg_print_syntax(stdout, argtable, "\n");
+    printf("This program extracts and prints data from a vive system.\n");
+    arg_print_glossary(stdout, argtable,"  %-25s %s\n");
+    exitcode = 0;
+    goto exit;
+  }
+  /* If the parser returned any errors then display them and exit */
+  if (nerrors > 0) {
+    /* Display the error details contained in the arg_end struct.*/
+    arg_print_errors(stdout,end,progname);
+    printf("Try '%s --help' for more information.\n", progname);
+    exitcode = 2;
+    goto exit;
+  }
   // Initialize the driver
   struct Driver * drv = deepdive_init(0);
   if (!drv) {
-    printf("Could not initialize deepdive\n");
-    return 1;
+    printf("%s: could not initialize driver\n", progname);
+    exitcode = 3;
+    goto exit;
   }
   // Install callbacks
-  deepdive_install_imu_fn(drv, my_imu_process);
-  deepdive_install_light_fn(drv, my_light_process);
-  deepdive_install_button_fn(drv, my_button_process);
+  if (imu->count > 0)
+    deepdive_install_imu_fn(drv, my_imu_process);
+  if (light->count > 0)
+    deepdive_install_light_fn(drv, my_light_process);
+  if (button->count > 0)
+    deepdive_install_button_fn(drv, my_button_process);
   // Keep going until ctrl+c
   while(deepdive_poll(drv) == 0) {}
     return 0;
+  // Exit cleanly
+  exitcode = 0;
+exit:
+  arg_freetable(argtable,sizeof(argtable)/sizeof(argtable[0]));
+  return exitcode;
 }
 
