@@ -6,9 +6,9 @@ Panels:
       Expanded:
         - /Global Options1
         - /Path1/Offset1
-        - /TF1
         - /TF1/Frames1
-        - /TF1/Frames1/dev1
+        - /TF1/Frames1/world1
+        - /Axes1
       Splitter Ratio: 0.5
     Tree Height: 598
   - Class: rviz/Selection
@@ -94,13 +94,15 @@ Visualization Manager:
       Enabled: true
       Frame Timeout: 15
       Frames:
-        2583881017:
+        3097796425:
           Value: true
-        All Enabled: true
+        907388239:
+          Value: true
+        All Enabled: false
         dev:
           Value: true
         world:
-          Value: true
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -108,11 +110,20 @@ Visualization Manager:
       Show Names: true
       Tree:
         world:
-          2583881017:
+          3097796425:
+            {}
+          907388239:
             {}
           dev:
             {}
       Update Interval: 0
+      Value: true
+    - Class: rviz/Axes
+      Enabled: true
+      Length: 1
+      Name: Axes
+      Radius: 0.00999999978
+      Reference Frame: world
       Value: true
   Enabled: true
   Global Options:
@@ -139,7 +150,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 3.01654935
+      Distance: 3.32087708
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
@@ -154,10 +165,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.845398307
+      Pitch: 0.465398371
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.3904233
+      Yaw: 5.33043194
     Saved: ~
 Window Geometry:
   Displays:

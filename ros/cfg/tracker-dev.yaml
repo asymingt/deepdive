@@ -1,6 +1,6 @@
 serial: "LHR-09DF88FD"
 frame: "dev"
-gravity:          [0.0, -9.80665, 0.0]
+gravity:          [0.0, 0.0, -9.80665]
 rate: 128
 initial_estimate:
   position:       [0, 0, 0]
@@ -10,7 +10,7 @@ initial_estimate:
   omega:          [0, 0, 0]
   gyro_bias:      [0, 0, 0]
 initial_covariance:
-  position:       [100, 100, 100]
+  position:       [1, 1, 1]
   attitude:       [10, 10, 10]
   velocity:       [1.0e-06, 1.0e-06, 1.0e-06]
   acceleration:   [1.0e-06, 1.0e-06, 1.0e-06]

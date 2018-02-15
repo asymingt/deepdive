@@ -78,8 +78,11 @@ std::string frame_;                             // Frame ID
 Filter filter_;                                 // Filter
 ros::Time last_(0);                             // Last update time
 UKF::Vector<3> extrinsics_(0, 0, 0);            // Measurement sensor
+UKF::Quaternion lh_att_;                        // Lighthouse attitude
+UKF::Vector<3> lh_pos_;                         // Lighthouse position
 uint8_t axis_ = 0;                              // Measurement axis
 bool ready_ = false;                            // Parameters received
+bool initialized_ = false;                      // One light measurement
 
 namespace UKF {
 
@@ -115,8 +118,13 @@ UKF::Vector<3> Measurement::expected_measurement
 template <> template <>
 real_t Measurement::expected_measurement
   <State, Angle>(State const& state) {
-    UKF::Vector<3> p = state.get_field<Attitude>().conjugate() * extrinsics_
-                     + state.get_field<Position>();
+    // Position of the sensor in the tracker frame
+    UKF::Vector<3> p = extrinsics_;
+    // Position of the sensor in the world frame
+    p = state.get_field<Attitude>().conjugate() * p + state.get_field<Position>();
+    // Position of the sensor in the lighthouse frame
+    p = lh_att_ * (p - lh_pos_);
+    // Vertical or horizontal angle
     return (axis_ ? -atan2(p[1], p[2]) : atan2(p[0], p[2]));
 }
 
@@ -154,14 +162,16 @@ void Convert(geometry_msgs::Vector3 const& from, UKF::Vector<3> & to) {
 bool Delta(ros::Time const& now, double & dt) {
   dt = (now - last_).toSec();
   last_ = now;
-  ROS_INFO_STREAM(dt);
+  // ROS_INFO_STREAM(dt);
   return (dt > 0 && dt < 1.0);
 }
 
 void TimerCallback(ros::TimerEvent const& info) {
+  if (!initialized_) return;
+
   // Check that we are being called fast enough
   static double dt;
-  if (!Delta(info.current_real, dt))
+  if (!Delta(ros::Time::now(), dt))
     return;
 
   // Get the filter from the tracker information
@@ -191,24 +201,22 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 
   // Check that we are being called fast enough
   static double dt;
-  if (!Delta(msg->header.stamp, dt))
+  if (!Delta(ros::Time::now(), dt))
     return;
 
   // Pull the calibrated pose of the tracker
   static tf2_ros::Buffer buffer;
   static tf2_ros::TransformListener listener(buffer);
-  static UKF::Quaternion lh_att;
-  static UKF::Vector<3> lh_pos;
   try {
     geometry_msgs::TransformStamped tf;
     tf = buffer.lookupTransform("world", msg->lighthouse, ros::Time(0));
-    lh_att.w() = tf.transform.rotation.w;
-    lh_att.x() = tf.transform.rotation.x;
-    lh_att.y() = tf.transform.rotation.y;
-    lh_att.z() = tf.transform.rotation.z;
-    lh_pos[0] = tf.transform.translation.x;
-    lh_pos[1] = tf.transform.translation.y;
-    lh_pos[2] = tf.transform.translation.z;
+    lh_att_.w() = tf.transform.rotation.w;
+    lh_att_.x() = tf.transform.rotation.x;
+    lh_att_.y() = tf.transform.rotation.y;
+    lh_att_.z() = tf.transform.rotation.z;
+    lh_pos_[0] = tf.transform.translation.x;
+    lh_pos_[1] = tf.transform.translation.y;
+    lh_pos_[2] = tf.transform.translation.z;
   }
   catch (tf2::TransformException &ex) {
     ROS_INFO_STREAM("LH " << msg->lighthouse << " NOT FOUND");
@@ -218,7 +226,7 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   // Process update
   filter_.a_priori_step(dt);
 
-  // Measurement update
+  // Innovation update
   for (size_t i = 0; i < msg->pulses.size(); i++) {
     // Set the sensor ID and axis, used in the measurement model
     axis_ = msg->axis;
@@ -230,7 +238,12 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
     measurement.set_field<Angle>(msg->pulses[i].angle);
     filter_.innovation_step(measurement);
   }
+ 
+  // Correction step 
   filter_.a_posteriori_step();
+ 
+  // We are now initialized
+  initialized_ = true;
 }
 
 // This will be called at approximately 250Hz
@@ -239,7 +252,7 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 
   // Check that we are being called fast enough
   static double dt;
-  if (!Delta(msg->header.stamp, dt))
+  if (!Delta(ros::Time::now(), dt))
     return;
 
   // Add the accelerometer and gyro data
@@ -415,8 +428,8 @@ int main(int argc, char **argv) {
   // Subscribe to the motion and light callbacks
   ros::Subscriber sub_tracker  =
     nh.subscribe("/trackers", 10, TrackerCallback);
-  ros::Subscriber sub_imu =
-    nh.subscribe("/imu", 10, ImuCallback);
+  //ros::Subscriber sub_imu =
+  //  nh.subscribe("/imu", 10, ImuCallback);
   ros::Subscriber sub_light =
     nh.subscribe("/light", 10, LightCallback);
 
