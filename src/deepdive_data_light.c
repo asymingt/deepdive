@@ -127,8 +127,8 @@ static void decode_packet(struct Tracker *tracker, uint8_t id,
   lh->mode_current = *(int8_t*)(data + 0x1f);
   lh->sys_faults = *(int8_t*)(data + 0x20);
   lh->timestamp = tc;
-  printf("[%10u] Tracker # %s rx config for LH %s (id: %u)\n",
-    tc, tracker->serial, lh->serial, id);
+  // printf("[%10u] Tracker # %s rx config for LH %s (id: %u)\n",
+  //  tc, tracker->serial, lh->serial, id);
 
   // There is no guarantee that two given trackers will enumerate the
   // same lighthouses as id 0 and id 1. So we need a lookup!
