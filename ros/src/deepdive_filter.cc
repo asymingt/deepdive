@@ -650,10 +650,6 @@ int main(int argc, char **argv) {
     noise_accel[0], noise_accel[1], noise_accel[2],
     noise_gyro_bias[0], noise_gyro_bias[1], noise_gyro_bias[2];
 
-  // Start a timer to callback
-  ros::Timer timer = nh.createTimer(
-    ros::Duration(ros::Rate(rate)), TimerCallback, false, true);
-
   // Subscribe to the motion and light callbacks
   ros::Subscriber sub_lighthouse  =
     nh.subscribe("/lighthouses", 10, LighthouseCallback);
@@ -673,6 +669,10 @@ int main(int argc, char **argv) {
     (topic_pose, 0);
   pub_twist_ = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>
     (topic_twist, 0);
+
+  // Start a timer to callback
+  ros::Timer timer = nh.createTimer(
+    ros::Duration(ros::Rate(rate)), TimerCallback, false, true);
 
   // Block until safe shutdown
   ros::spin();

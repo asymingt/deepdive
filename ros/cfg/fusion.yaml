@@ -24,3 +24,7 @@ frames:
 topic:
   pose: "/loc/truth/pose"
   twist: "/loc/truth/twist"
+
+
+# Tracking rate
+rate: 10.0

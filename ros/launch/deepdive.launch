@@ -35,12 +35,10 @@
         pkg="deepdive_ros" type="deepdive_filter">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/filter-port.yaml" />
   </node>
-  <!--
   <node name="deepdive_filter_stbd" output="$(arg output)"
         pkg="deepdive_ros" type="deepdive_filter">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/filter-stbd.yaml" />
   </node>
-  -->
 
   <!-- One fusion for the whole system -->
   <node name="deepdive_fusion" output="$(arg output)"

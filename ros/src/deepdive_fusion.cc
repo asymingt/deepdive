@@ -120,6 +120,16 @@ void TimerCallback(ros::TimerEvent const& info) {
     msg.pose.orientation.y = q.y();
     msg.pose.orientation.z = q.z();
     pub_pose_.publish(msg);
+    // Package and send on TF2
+    static tf2_ros::TransformBroadcaster br;
+    geometry_msgs::TransformStamped tf;
+    tf.header = msg.header;
+    tf.child_frame_id = frame_child_;
+    tf.transform.translation.x = msg.pose.position.x;
+    tf.transform.translation.y = msg.pose.position.y;
+    tf.transform.translation.z = msg.pose.position.z;
+    tf.transform.rotation = msg.pose.orientation;
+    br.sendTransform(tf);
     // Clear the data
     pose_estimates_.clear();
   }
@@ -277,9 +287,19 @@ int main(int argc, char **argv) {
   if (!nh.getParam("frames/child", frame_child_))
     ROS_FATAL("Failed to get frames/child parameter.");  
 
+  // Get the tracker update rate. Anything over the IMU rate is really not
+  // adding much, since we don't have a good dynamics model.
+  double rate = 100;
+  if (!nh.getParam("rate",rate))
+    ROS_FATAL("Failed to get rate parameter.");
+
   /// Setup the publishers to send out pose and twist with covariances
   pub_pose_ = nh.advertise<geometry_msgs::PoseStamped>(topic_pose, 0);
   pub_twist_ = nh.advertise<geometry_msgs::TwistStamped>(topic_twist, 0);
+
+  // Start a timer to callback
+  ros::Timer timer = nh.createTimer(
+    ros::Duration(ros::Rate(rate)), TimerCallback, false, true);
 
   // Block until safe shutdown
   ros::spin();
