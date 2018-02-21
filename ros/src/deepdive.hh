@@ -59,5 +59,44 @@ void Convert(const T from[3], geometry_msgs::Point & to) {
   to.z = from[2];
 }
 
+// Recursively calculates mean and standar deviation
+class Statistics {
+ public:
+  // Constructor and initialization
+  Statistics() : count_(0.0), mean_(0.0), var_(0.0) {};
+
+  // Feed a value and calculate recursive statistics
+  void Feed(double value) {
+    count_ += 1.0;
+    if (count_ < 2) {
+      mean_ = value;
+      var_ = 0.0;
+      return;
+    }
+    var_ = (count_ - 2.0) / (count_ - 1.0) * var_
+         + (value - mean_) * (value - mean_) / count_;
+    mean_ = ((count_ - 1.0) * mean_ + value) / count_;
+  }
+
+  // Get statistics
+  double Count() { return count_; }
+  double Mean() { return mean_; }
+  double Variance() { return var_; }
+  double Deviation() { return sqrt(var_); }
+
+  // Reset the statistics
+  void Reset() {
+    count_ = 0.0;
+    mean_ = 0.0;
+    var_ = 0.0;
+  }
+
+ private:
+  double count_;
+  double var_;
+  double mean_;
+};
+
+
 
 #endif

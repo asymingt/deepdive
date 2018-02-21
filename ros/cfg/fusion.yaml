@@ -1,0 +1,22 @@
+# The parent trackers for this rigid body
+parents:
+  - topics:
+      pose: "/loc/port/pose"
+      twist: "/loc/port/twist"
+    position : [0 0 0] 
+    rotation : [0 0 0 1]
+  - topics:
+      pose: "/loc/stbd/pose"
+      twist: "/loc/stbd/twist"
+    position : [0 0 0] 
+    rotation : [0 0 0 1]
+
+# TF2 output frame
+frames:
+  parent: "world"
+  child: "truth"
+
+# ROS output tpics
+topic:
+  pose: "/loc/truth/pose"
+  twist: "/loc/truth/twist"

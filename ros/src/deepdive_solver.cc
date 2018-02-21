@@ -99,14 +99,27 @@ struct Tracker {
   double Tt_b[6];
   double extrinsics[MAX_NUM_SENSORS*6];
 };
-typedef std::map<std::string,Tracker> Trackers;
+typedef std::map<std::string, Tracker> Trackers;
 
 // Lighthouse data structures
 struct Lighthouse {
-  double Tl_w[6];
+  double wTl[6];
   double calibration[SIZE_AXIS][SIZE_CAL];
 };
-typedef std::map<std::string,Lighthouse> Lighthouses;
+typedef std::map<std::string, Lighthouse> Lighthouses;
+
+// Configurable parameters
+
+std::string frame_ = "world";
+std::vector<std::string> permitted_lighthouses_;
+std::vector<std::string> permitted_trackers_;
+bool refine_extrinsics_ = false;
+bool refine_calibration_ = false;
+double param_max_time_ = 1.0;
+int param_max_iterations_ = 1000;
+int param_threads_ = 4;
+double param_gradient_tolerance_ = 1e-6;
+bool param_debug_ = false;
 
 // SHARED DATA and MUTEX LOCK
 
@@ -118,47 +131,22 @@ std::mutex mutex_;
 
 // CERES SOLVER THREAD
 
-// Helper function to combine transforms Tji = Tj * Ti
-template <typename T> inline
-void CombineTransforms(const T ti[6], const T tj[6], T tji[6]) {
-  static T qi[4], qj[4], qji[4];
-  ceres::AngleAxisToQuaternion(&ti[3], qi);
-  ceres::AngleAxisToQuaternion(&tj[3], qj);
-  ceres::QuaternionProduct(qj, qi, qji);
-  ceres::QuaternionToAngleAxis(qji, &tji[3]);
-  for (size_t i = 0; i < 3; i++)
-    tji[i] = ti[i] + tj[i];
-}
-
-// Helper function to apply a transform
-template <typename T> inline
-void ApplyTransform(const T Tj_i[6], const T x_i[3], T x_j[3]) {
-  ceres::AngleAxisRotatePoint(&Tj_i[3], x_i, x_j);
-  for (size_t i = 0; i < 3; i++)
-    x_j[i] += Tj_i[i];
-}
-
-// Helper function to invert a transform
-template <typename T> inline
-void InvertTransform(const T Tj_i[6], T Ti_j[6]) {
-  for (size_t i = 0; i < 6; i++)
-    Ti_j[i] = -Tj_i[i];
-}
-
-// The basic principle of the cost functor is to predict the angles between
-// the lighthouse and the sensor frame. To do this, we need to move the 
+// We ultimately 
 struct LightCost {
   // Constructor
   explicit LightCost(deepdive_ros::Light const& measurement) :
     measurement_(measurement) {}
   // Called by ceres-solver to calculate error
   template <typename T>
-  bool operator()(const T* const Tl_w,          // Lighthouse in world frame
-                  const T* const Tb_w,          // Body in world frame
-                  const T* const Tt_b,          // Tracker in body frame
-                  const T* const calibration,   // Lighthouse calibration
+  bool operator()(const T* const wTl_a,         // Transform: lighthouse A -> world
+                  const T* const wTl_b,         // Transform: lighthouse B -> world
+                  const T* const cal_a,         // Calibration: lighthouse A
+                  const T* const cal_b,         // Calibration: lighthouse B
                   const T* const extrinsics,    // Tracker extrinsics
                   T* residual) const {
+    //
+    Eigen::Transform<T, 3, Eigen::Affine> ;
+
     // Get the transform that moves the sensor from the tracker to
     static T Tw_t[6], Tw_b[6], Tb_t[6], Tl_t[6], Sx[3], Sn[3], ax[2];
     static uint16_t a, s;
@@ -474,16 +462,10 @@ void WorkerThread() {
         pub_stations_.publish(msg);
       }
     }
-
-    // Sleep for a little
-    rate_loop.sleep();
   }
 }
 
-// MESSAGE CALLBACKS
-
-std::vector<std::string> permitted_lighthouses_;
-std::vector<std::string> permitted_trackers_;
+// Data callbacks
 
 void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg) {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -527,10 +509,27 @@ int main(int argc, char **argv) {
   ros::NodeHandle nh("~");
 
   // Get the list of permitted devices in the system
+  if (!nh.getParam("frame", frame_))
+    ROS_FATAL("Failed to get frame.");
   if (!nh.getParam("lighthouses", permitted_lighthouses_))
-    ROS_FATAL("Failed to get device list.");
+    ROS_FATAL("Failed to get permitted lighthouse list.");
   if (!nh.getParam("trackers", permitted_trackers_))
-    ROS_FATAL("Failed to get device list.");
+    ROS_FATAL("Failed to get permitted tracker list.");
+  if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
+    ROS_FATAL("Failed to get the refine extrinsics parameter.");
+  if (!nh.getParam("refine/calibration", refine_calibration_))
+    ROS_FATAL("Failed to get the refine calibration parameter.");
+
+  if (!nh.getParam("parameters/max_time", param_max_time_))
+    ROS_FATAL("Failed to get the refine parameters/max_time parameter.");
+  if (!nh.getParam("parameters/max_iterations", param_max_iterations_))
+    ROS_FATAL("Failed to get the refine parameters/max_iterations parameter.");
+  if (!nh.getParam("parameters/threads", param_threads_))
+    ROS_FATAL("Failed to get the refine parameters/threads parameter.");
+  if (!nh.getParam("parameters/gradient_tolerance", param_gradient_tolerance_))
+    ROS_FATAL("Failed to get the refine parameters/gradient_tolerance parameter.");
+  if (!nh.getParam("parameters/debug", param_debug_))
+    ROS_FATAL("Failed to get the refine parameters/debug parameter.");
 
   // Publish the trajectory
   pub_trajectory_ = nh.advertise<nav_msgs::Path>("/path", 10);

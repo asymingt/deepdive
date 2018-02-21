@@ -1,0 +1,30 @@
+# Fixed frame in which we ultimately want our results
+frame: "world"
+
+# Rate at which solution is called
+rate: 1.0
+
+# List of trackers to be included. They do not necessarily
+# have to be rigid with respect to one another.
+trackers:
+  - "LHR-08DDBC05"
+  - "LHR-08DE340B"
+
+# List of lighthouses to be included. They do must be rigid
+# with respect to each other and the world frame.
+lighthouses:
+  - "668207140"
+  - "2935772913"
+
+# Extra things we might want to solve for
+refine:
+  extrinsics: false
+  calibration: false
+
+# Optimizer parameters
+parameters:
+  max_time: 10.0
+  max_iterations: 1000
+  gradient_tolerance: 1e-6
+  threads: 4
+  debug: false

@@ -1,0 +1,40 @@
+serial:           "LHR-09DF88FD"
+frames:
+  parent:         "world"
+  child:          "port"
+topics:
+  pose:           "/loc/port/pose"
+  twist:          "/loc/port/twist"
+  sensors:        "/loc/port/sensors"
+thresholds:
+  angle:          1.0471975512
+  duration:       1.0e-06
+gravity:          [0.0, 0.0, -9.80665]
+rate:             62.5
+correct:
+  light:          false
+  imu:            false
+use:
+  light:          true
+  imu:            false 
+initial_estimate:
+  position:       [0, 0, 0]
+  attitude:       [0, 0, 0, 1]
+  velocity:       [0, 0, 0]
+  angvel:         [0, 0, 0]
+  acceleration:   [0, 0, 0]
+  gyro_bias:      [0, 0, 0]
+initial_covariance:
+  position:       [10, 10, 10]
+  attitude:       [10, 10, 10]
+  velocity:       [1.0e-03, 1.0e-03, 1.0e-03]
+  angvel:         [1.0e-03, 1.0e-03, 1.0e-03]
+  acceleration:   [1.0e-03, 1.0e-03, 1.0e-03]
+  gyro_bias:      [1.0e-01, 1.0e-01, 1.0e-01]
+process_noise:
+  position:       [1.0e-08, 1.0e-08, 1.0e-08]
+  attitude:       [1.0e-08, 1.0e-08, 1.0e-08]
+  velocity:       [1.0e-04, 1.0e-04, 1.0e-04]
+  angvel:         [1.0e-04, 1.0e-04, 1.0e-04]
+  acceleration:   [1.0e-02, 1.0e-02, 1.0e-02]
+  gyro_bias:      [2.4e-10, 2.4e-10, 2.4e-10]
