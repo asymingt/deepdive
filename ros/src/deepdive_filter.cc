@@ -228,12 +228,10 @@ void TimerCallback(ros::TimerEvent const& info) {
 
   // Transform the covariances to reflect the coordinate frame change. See:
   // https://robotics.stackexchange.com/questions/2556/how-to-rotate-covariance
-  Eigen::Matrix<double, 12, 12> P = filter_.covariance.block<12, 12>(0, 0);
-  Eigen::Matrix<double, 12, 12> R = Eigen::Matrix<double, 12, 12>::Identity();
+  Eigen::Matrix<double, 6, 6> P = filter_.covariance.block<6, 6>(0, 0);
+  Eigen::Matrix<double, 6, 6> R = Eigen::Matrix<double, 6, 6>::Identity();
   R.block<3,3>(0, 0) = iTh.linear().inverse();
-  R.block<3,3>(3, 3) = R.block<3,3>(0, 0);
-  R.block<3,3>(6, 6) = R.block<3,3>(0, 0);
-  R.block<3,3>(9, 9) = R.block<3,3>(0, 0);
+  R.block<3,3>(3, 3) = iTh.linear().inverse();
   P = R * P * R.transpose();
 
   // The filter relates WORLD and IMU frames

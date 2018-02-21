@@ -60,7 +60,7 @@ target_compile_definitions(deepdive_filter
 #target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
 
 # Fusion merges multiple tracker solutions to track a rigid body
-#cs_add_executable(deepdive_fusion src/deepdive_fusion.cc)
+cs_add_executable(deepdive_fusion src/deepdive_fusion.cc)
 
 # Install products
 cs_install()

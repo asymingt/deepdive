@@ -43,12 +43,10 @@
   -->
 
   <!-- One fusion for the whole system -->
-  <!--
   <node name="deepdive_fusion" output="$(arg output)"
         pkg="deepdive_ros" type="deepdive_fusion">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/fusion.yaml" />
   </node>
-  -->
 
   <!-- Visualization -->
   <node if="$(arg rviz)" name="deepdive_rviz" pkg="rviz" type="rviz"
