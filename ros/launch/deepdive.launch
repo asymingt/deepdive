@@ -17,37 +17,4 @@
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
         pkg="deepdive_ros" type="deepdive_bridge"/>
 
-  <!-- One solver for the whole system -->
-  <!--
-  <node name="deepdive_solver" output="$(arg output)"
-        pkg="deepdive_ros" type="deepdive_solver">
-    <rosparam command="load" file="$(find deepdive_ros)/cfg/solver.yaml" />
-  </node>
-  -->
-  <!-- Temporary -->
-  <node pkg="tf2_ros" type="static_transform_publisher" name="lighthouse_3097796425"
-      args="-1.5 0 0    0.5  0.5  0.5  0.5    world 3097796425" />
-  <node pkg="tf2_ros" type="static_transform_publisher" name="lighthouse_907388239"
-      args=" 1.5 0 0    -0.5  0.5 0.5 -0.5    world 907388239" />
-
-  <!-- Tracking filters -->
-  <node name="deepdive_filter_port" output="$(arg output)"
-        pkg="deepdive_ros" type="deepdive_filter">
-    <rosparam command="load" file="$(find deepdive_ros)/cfg/filter-port.yaml" />
-  </node>
-  <node name="deepdive_filter_stbd" output="$(arg output)"
-        pkg="deepdive_ros" type="deepdive_filter">
-    <rosparam command="load" file="$(find deepdive_ros)/cfg/filter-stbd.yaml" />
-  </node>
-
-  <!-- One fusion for the whole system -->
-  <node name="deepdive_fusion" output="$(arg output)"
-        pkg="deepdive_ros" type="deepdive_fusion">
-    <rosparam command="load" file="$(find deepdive_ros)/cfg/fusion.yaml" />
-  </node>
-
-  <!-- Visualization -->
-  <node if="$(arg rviz)" name="deepdive_rviz" pkg="rviz" type="rviz"
-        args="-d $(find deepdive_ros)/rviz/deepdive.rviz"/>
-
 </launch>

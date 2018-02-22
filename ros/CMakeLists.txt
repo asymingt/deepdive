@@ -56,8 +56,8 @@ target_compile_definitions(deepdive_filter
   PRIVATE -DUKF_DOUBLE_PRECISION)
 
 # Solver finds the world pose of every lighthouse
-#cs_add_executable(deepdive_solver src/deepdive_solver.cc)
-#target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
+cs_add_executable(deepdive_solver src/deepdive_solver.cc)
+target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
 
 # Fusion merges multiple tracker solutions to track a rigid body
 cs_add_executable(deepdive_fusion src/deepdive_fusion.cc)
