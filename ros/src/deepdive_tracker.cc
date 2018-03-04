@@ -282,7 +282,7 @@ void TimerCallback(ros::TimerEvent const& info) {
   twcs.twist.twist.angular.z = angvel[2];
   for (size_t i = 0; i < 6; i++)
     for (size_t j = 0; j < 6; j++)
-      twcs.twist.covariance[i*6 + j] = P(6 + i, 6 + j);
+      twcs.twist.covariance[i*6 + j] = P(i, j);
   pub_twist_.publish(twcs);
 
   // Publish the static markers
@@ -641,7 +641,7 @@ int main(int argc, char **argv) {
   filter_.covariance = State::CovarianceMatrix::Zero();
   filter_.covariance.diagonal() <<
     cov_position[0], cov_position[1], cov_position[2],
-    cov_attitude[0], cov_attitude[1], cov_attitude[2];
+    cov_attitude[0], cov_attitude[1], cov_attitude[2],
     cov_velocity[0], cov_velocity[1], cov_velocity[2],
     cov_angvel[0], cov_angvel[1], cov_angvel[2],
     cov_accel[0], cov_accel[1], cov_accel[2],
@@ -649,7 +649,7 @@ int main(int argc, char **argv) {
   filter_.process_noise_covariance = State::CovarianceMatrix::Zero();
   filter_.process_noise_covariance.diagonal() <<
     noise_position[0], noise_position[1], noise_position[2],
-    noise_attitude[0], noise_attitude[1], noise_attitude[2];
+    noise_attitude[0], noise_attitude[1], noise_attitude[2],
     noise_velocity[0], noise_velocity[1], noise_velocity[2],
     noise_angvel[0], noise_angvel[1], noise_angvel[2],
     noise_accel[0], noise_accel[1], noise_accel[2],
