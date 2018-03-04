@@ -50,14 +50,14 @@ cs_add_executable(deepdive_bridge src/deepdive_bridge.cc)
 target_link_libraries(deepdive_bridge ${DEEPDIVE_LIBRARIES})
 
 # Filter find the world pose of a soecific tracker
-cs_add_executable(deepdive_filter src/deepdive_filter.cc)
-add_dependencies(deepdive_filter ukf)
-target_compile_definitions(deepdive_filter
+cs_add_executable(deepdive_tracker src/deepdive_tracker.cc)
+add_dependencies(deepdive_tracker ukf)
+target_compile_definitions(deepdive_tracker
   PRIVATE -DUKF_DOUBLE_PRECISION)
 
 # Solver finds the world pose of every lighthouse
-cs_add_executable(deepdive_solver src/deepdive_solver.cc)
-target_link_libraries(deepdive_solver ${CERES_LIBRARIES})
+cs_add_executable(deepdive_calibration src/deepdive_calibration.cc)
+target_link_libraries(deepdive_calibration ${CERES_LIBRARIES})
 
 # Fusion merges multiple tracker solutions to track a rigid body
 cs_add_executable(deepdive_fusion src/deepdive_fusion.cc)

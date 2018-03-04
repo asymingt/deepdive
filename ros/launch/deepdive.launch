@@ -5,16 +5,42 @@
   <arg name="replay" default="" />
   <arg name="record" default="" />
   <arg name="rviz" default="true" />
-  <arg name="output" default="log" />
+  <arg name="output" default="screen" />
 
-  <!-- Data recorded, if needed -->
+  <!-- SUPPORT NODES -->
+
+  <!-- Visualization, if needed -->
+  <node if="$(arg rviz)" name="deepdive_rviz" pkg="rviz" type="rviz"
+        args="-d $(find deepdive_ros)/rviz/deepdive.rviz"/>
+
+  <!-- Data recorder, if needed -->
   <node if="$(eval arg('record') != '')" name="deepdive_recorder" output="$(arg output)"
         pkg="rosbag" type="record" args="-O $(arg record) -a"/>
+
+  <!-- Data replay, if needed -->
+  <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
+        pkg="deepdive_ros" type="deepdive_bridge"/>
+
+  <!-- CORE NODES -->
 
   <!-- Bridge or bag replay, depending on arguments -->
   <node if="$(eval arg('replay') != '')" name="deepdive_player" output="$(arg output)"
         pkg="rosbag" type="play" args="--clock $(arg replay)"/>
-  <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
-        pkg="deepdive_ros" type="deepdive_bridge"/>
+
+  <!-- One filter for each of the two trackers -->
+  <node name="deepdive_tracker_port" output="$(arg output)"
+        pkg="deepdive_ros" type="deepdive_tracker">
+    <rosparam command="load" file="$(find deepdive_ros)/cfg/tracker-port.yaml" />
+  </node>
+  <node name="deepdive_tracker_stbd" output="$(arg output)"
+        pkg="deepdive_ros" type="deepdive_tracker">
+    <rosparam command="load" file="$(find deepdive_ros)/cfg/tracker-stbd.yaml" />
+  </node>
+
+  <!-- One calibration algorithm-->
+  <node name="deepdive_calibration" output="$(arg output)"
+        pkg="deepdive_ros" type="deepdive_calibration">
+    <rosparam command="load" file="$(find deepdive_ros)/cfg/calibration.yaml" />
+  </node>
 
 </launch>

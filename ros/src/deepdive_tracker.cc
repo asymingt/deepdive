@@ -37,6 +37,11 @@
 // Deepdive internal
 #include "deepdive.hh"
 
+// CONVERSIONS
+
+static constexpr double DEGS_TO_RADS = M_PI / 180.0;
+static constexpr double USECS_TO_SECS = 1e-6;
+
 // STATE AND PROCESS MODEL
 
 // State indexes
@@ -350,11 +355,11 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 
   // Innovation updates - one for each pulse angle
   for (size_t i = 0; i < msg->pulses.size(); i++) {
-    if (fabs(msg->pulses[i].angle) > thresh_angle_) {
+    if (fabs(msg->pulses[i].angle) > thresh_angle_ * DEGS_TO_RADS) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on angle");
       return;
     }
-    if (fabs(msg->pulses[i].duration) < thresh_duration_) {
+    if (fabs(msg->pulses[i].duration) < thresh_duration_ * USECS_TO_SECS) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on duration");
       return;
     }
@@ -516,7 +521,7 @@ bool GetQuaternionParam(ros::NodeHandle &nh,
 // Main entry point of application
 int main(int argc, char **argv) {
   // Initialize ROS and create node handle
-  ros::init(argc, argv, "deepdive_filter");
+  ros::init(argc, argv, "deepdive_tracker");
   ros::NodeHandle nh("~");
 
   // Get some global information
