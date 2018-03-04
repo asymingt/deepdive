@@ -250,7 +250,7 @@ void Publish() {
 // Helper function to apply a transform b = Ra + t
 template <typename T> inline
 void TransformInPlace(const T transform[6], T x[3]) {
-  static T tmp[3];
+  T tmp[3];
   ceres::AngleAxisRotatePoint(&transform[3], x, tmp);
   x[0] = tmp[0] + transform[0];
   x[1] = tmp[1] + transform[1];
@@ -260,7 +260,7 @@ void TransformInPlace(const T transform[6], T x[3]) {
 // Helper function to invert a transform a = R'(b - t)
 template <typename T> inline
 void InverseTransformInPlace(const T transform[6], T x[3]) {
-  static T aa[3], tmp[3];
+  T aa[3], tmp[3];
   tmp[0] = x[0] - transform[0];
   tmp[1] = x[1] - transform[1];
   tmp[2] = x[2] - transform[2];
