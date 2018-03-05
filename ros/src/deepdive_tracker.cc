@@ -156,10 +156,10 @@ real_t Measurement::expected_measurement
     // Apply the corrections
     if (correct_light_) {
       deepdive_ros::Motor & motor = cal_[l][a];
-      angles[a] += motor.phase;
-      angles[a] += motor.tilt * angles[1-a];
-      angles[a] += motor.curve * angles[1-a] * angles[1-a];
-      angles[a] += motor.gibmag * std::sin(angles[1-a] + motor.gibphase);
+      angles[a] -= motor.phase;
+      angles[a] -= motor.tilt * angles[1-a];
+      angles[a] -= motor.curve * angles[1-a] * angles[1-a];
+      angles[a] -= motor.gibmag * std::cos(angles[1-a] + motor.gibphase);
     }
     // Vertical or horizontal angle
     return angles[a];
