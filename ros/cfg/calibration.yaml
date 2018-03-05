@@ -33,7 +33,7 @@ thresholds:
 # Apply light corrections broadcast over OOTX
 correct:                false 
 
-# What to add to the non-linear solver
+# What else to refine, besides the lighthouse ans sensor positions
 refine:
   extrinsics:           false      # If false tracker frame is the body frame
   sensors:              false      # Refine sensor positions
@@ -60,7 +60,15 @@ lighthouses:
 
 # List of trackers to be included. They must be rigid with respect to each
 # other and the body being tracked. You can put as many as you'd like in this
-# list. However, each tracker listed must
+# list. However, each tracker listed must have an associates
 trackers:
-  - "LHR-09DF88FD"
-#  - "LHR-1FC0DEF4"
+  - "tracker_port"
+  - "tracker_stbd"
+
+tracker_port:
+  serial: "LHR-09DF88FD"
+  extrinsics: [0, 0, 0, 0, 0, 0, 1]
+
+tracker_stbd:
+  serial: "LHR-1FC0DEF4"
+  extrinsics: [0, 0, 0, 0, 0, 0, 1]

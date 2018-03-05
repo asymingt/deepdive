@@ -136,7 +136,7 @@ int ReadConfig() {
       return 0;
     }
     Eigen::AngleAxisd aa(Eigen::Quaterniond(qw, qx, qy, qz));
-    if (p == frame_parent_ && lighthouses_.find(c) != lighthouses_.end()) {
+    if (lighthouses_.find(c) != lighthouses_.end()) {
       lighthouses_[c].wTl[0] = x;
       lighthouses_[c].wTl[1] = y;
       lighthouses_[c].wTl[2] = z;
@@ -146,17 +146,7 @@ int ReadConfig() {
       count++;
       continue;
     }
-    if (p == frame_child_ && trackers_.find(c) != trackers_.end()) {
-      trackers_[c].bTh[0] = x;
-      trackers_[c].bTh[1] = y;
-      trackers_[c].bTh[2] = z;
-      trackers_[c].bTh[3] = aa.angle() * aa.axis()[0];
-      trackers_[c].bTh[4] = aa.angle() * aa.axis()[1];
-      trackers_[c].bTh[5] = aa.angle() * aa.axis()[2];
-      count++;
-      continue;
-    }
-    ROS_WARN_STREAM("Transform " << p << " ->" << c << " invalid");
+    ROS_WARN_STREAM("Transform " << p << " -> " << c << " invalid");
   }
   return count;
 }
@@ -237,7 +227,7 @@ void Publish() {
     tfs.transform.rotation.w = q.w();
     SendStaticTransform(tfs);
   }
-  // Publish tracker positions
+  // Publish tracker extrinsics
   std::map<std::string, Tracker>::iterator jt;
   for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
     Eigen::Vector3d v(jt->second.bTh[3], jt->second.bTh[4], jt->second.bTh[5]);
@@ -247,7 +237,7 @@ void Publish() {
       aa.axis() = v.normalized();
     }
     Eigen::Quaterniond q(aa);
-    tfs.header.frame_id = frame_child_;
+    tfs.header.frame_id = jt->first + "/" + frame_child_;
     tfs.child_frame_id = jt->first;
     tfs.transform.translation.x = jt->second.bTh[0];
     tfs.transform.translation.y = jt->second.bTh[1];
@@ -373,7 +363,8 @@ bool Solve() {
     ROS_INFO_STREAM("Processing " << measurements_.size() << " measurements");
   }
   std::map<ros::Time, Measurement>::iterator mt, mt_p;
-  std::map<std::string, size_t> tally;
+  std::map<std::string, size_t> l_tally;
+  std::map<std::string, size_t> t_tally;
   for (mt = measurements_.begin(); mt != measurements_.end(); mt++) {
     // Get references to the lighthouse, tracker and axis
     Tracker & tracker = trackers_[mt->second.light.header.frame_id];
@@ -381,7 +372,8 @@ bool Solve() {
     size_t axis = mt->second.light.axis;
 
     // Register that we have received from this lighthouse
-    tally[mt->second.light.lighthouse]++;
+    l_tally[mt->second.light.lighthouse]++;
+    t_tally[mt->second.light.header.frame_id]++;
 
     // Add the cost function
     ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
@@ -406,14 +398,21 @@ bool Solve() {
         reinterpret_cast<double*>(mt->second.wTb));
     }
   }
-  if (tally.size() != lighthouses_.size()) {
+  if (l_tally.size() != lighthouses_.size()) {
     ROS_WARN("We didn't receive data from all lighthouses. Aborting");
     return false;
+  } else if (t_tally.size() != trackers_.size()) {
+    ROS_WARN("We didn't receive data from all trackers. Aborting");
+    return false;
   } else {
-    ROS_INFO_STREAM("Data summary:");
+    ROS_INFO_STREAM("We received this much data from each lighthouse:");
     std::map<std::string, Lighthouse>::iterator it;
     for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) 
-      ROS_INFO_STREAM("- LH " << it->first << ": " << tally[it->first]);
+      ROS_INFO_STREAM("- ID " << it->first << ": " << l_tally[it->first]);
+    ROS_INFO_STREAM("We received this much data from each tracker:");
+    std::map<std::string, Tracker>::iterator jt;
+    for (jt = trackers_.begin(); jt != trackers_.end(); jt++) 
+      ROS_INFO_STREAM("- ID " << jt->first << ": " << t_tally[jt->first]);
   }
 
   // Add corrections
@@ -539,7 +538,8 @@ void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg) {
       lighthouse.params[i][CAL_GIB_MAG] = it->motors[i].gibmag;
       lighthouse.params[i][CAL_CURVE] = it->motors[i].curve;
     }
-    ROS_INFO_STREAM("Received data from lighthouse " << it->serial);
+    if (!lighthouse.ready)
+      ROS_INFO_STREAM("Received data from lighthouse " << it->serial);
     lighthouse.ready = true;
   }
 }
@@ -758,8 +758,31 @@ int main(int argc, char **argv) {
   if (!nh.getParam("trackers", trackers))
     ROS_FATAL("Failed to get the tracker list.");
   std::vector<std::string>::iterator jt;
-  for (jt = trackers.begin(); jt != trackers.end(); jt++)
-    trackers_[*jt].ready = false;
+  for (jt = trackers.begin(); jt != trackers.end(); jt++) {
+    std::string serial;
+    if (!nh.getParam(*jt + "/serial", serial))
+      ROS_FATAL("Failed to get the tracker serial.");
+    std::vector<double> extrinsics;
+    if (!nh.getParam(*jt + "/extrinsics", extrinsics))
+      ROS_FATAL("Failed to get the tracker extrinsics.");
+    if (extrinsics.size() != 7) {
+      ROS_FATAL("Failed to parse tracker extrinsics.");
+      continue;
+    }
+    Eigen::Quaterniond q(
+      extrinsics[6],  // qw
+      extrinsics[3],  // qx
+      extrinsics[4],  // qy
+      extrinsics[5]); // qz
+    Eigen::AngleAxisd aa(q);
+    trackers_[serial].bTh[0] = extrinsics[0];
+    trackers_[serial].bTh[1] = extrinsics[1];
+    trackers_[serial].bTh[2] = extrinsics[2];
+    trackers_[serial].bTh[3] = aa.angle() * aa.axis()[0];
+    trackers_[serial].bTh[4] = aa.angle() * aa.axis()[1];
+    trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];
+    trackers_[serial].ready = false;
+  }
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  =
@@ -783,8 +806,8 @@ int main(int argc, char **argv) {
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
   int n = ReadConfig();
-  if (n == lighthouses_.size() + trackers_.size()) {
-    ROS_INFO_STREAM("Read " << n << " frame transforms from calibration");
+  if (n == lighthouses_.size()) {
+    ROS_INFO_STREAM("Read " << n << " lighthouse transforms from calibration");
     Publish();
   } else {
     ROS_INFO_STREAM("Could not read calibration file");
