@@ -323,14 +323,14 @@ struct LightCost {
       TransformInPlace(wTb, y);           // body -> world
       InverseTransformInPlace(wTl, y);    // world -> lighthouse
       // Predict the angles
-      angle[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan(x[0]/x[2]);
-      angle[deepdive_ros::Motor::AXIS_VERTICAL] = atan(x[1]/x[2]);
+      angle[deepdive_ros::Motor::AXIS_HORIZONTAL] = atan2(x[0], x[2]);
+      angle[deepdive_ros::Motor::AXIS_VERTICAL] = atan2(x[1], x[2]);
       // We want the normal to be negative in the lighthouse frame, otherwise
       // it's not pointing at the lighthouse
-      if (y[3] > T(0.0)) {
-        angle[deepdive_ros::Motor::AXIS_HORIZONTAL] += T(M_PI/2.0);
-        angle[deepdive_ros::Motor::AXIS_VERTICAL] += T(M_PI/2.0);
-      }
+      // if (y[2] > T(0.0)) {
+      //   angle[deepdive_ros::Motor::AXIS_HORIZONTAL] += T(M_PI/2.0);
+      //   angle[deepdive_ros::Motor::AXIS_VERTICAL] += T(M_PI/2.0);
+      // }
       // Apply the error correction as needed. I am going to assume that the
       // engineers kept this equation as simple as possible, and infer the
       // meaning of the calibration parameters based on their name. It might
