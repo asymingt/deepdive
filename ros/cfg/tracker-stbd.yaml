@@ -1,4 +1,4 @@
-# Tracker serial number
+# Tracker serial number (this will be the parent frame)
 serial:           "LHR-1FC0DEF4"
 
 # This filter relates these two frames
@@ -10,7 +10,6 @@ frames:
 topics:
   pose:           "/loc/stbd/pose"      # Topic for publishing pose
   twist:          "/loc/stbd/twist"     # Topic for publishing twist
-  sensors:        "/loc/stbd/sensors"   # Topic for publishing sensor viz
 
 # Gravity vector in fixed parent (inertial) frame
 gravity:          [0.0, 0.0, -9.80665]

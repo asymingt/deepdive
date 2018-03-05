@@ -10,7 +10,6 @@ frames:
 topics:
   pose:           "/loc/port/pose"      # Topic for publishing pose
   twist:          "/loc/port/twist"     # Topic for publishing twist
-  sensors:        "/loc/port/sensors"   # Topic for publishing sensor viz
 
 # Gravity vector in fixed parent (inertial) frame
 gravity:          [0.0, 0.0, -9.80665]
