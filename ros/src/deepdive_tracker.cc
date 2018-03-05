@@ -10,7 +10,6 @@
 #include <tf2_ros/static_transform_broadcaster.h>
 
 // General messages
-#include <visualization_msgs/MarkerArray.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <geometry_msgs/TwistWithCovarianceStamped.h>
 #include <geometry_msgs/TransformStamped.h>
@@ -101,7 +100,6 @@ bool ready_ = false;                                // Parameters received
 bool initialized_ = false;                          // One light measurement
 bool correct_imu_ = false;                          // Calibrate IMU
 bool correct_light_ = false;                        // Calibrate light
-ros::Publisher pub_markers_;                        // Visualization publisher
 ros::Publisher pub_pose_;                           // Pose publisher
 ros::Publisher pub_twist_;                          // Twist publisher
 double thresh_angle_;                               // Threshold on angle
@@ -284,34 +282,6 @@ void TimerCallback(ros::TimerEvent const& info) {
     for (size_t j = 0; j < 6; j++)
       twcs.twist.covariance[i*6 + j] = P(i, j);
   pub_twist_.publish(twcs);
-
-  // Publish the static markers
-  static visualization_msgs::MarkerArray msg;
-  msg.markers.resize(extrinsics_.size());
-  for (uint16_t i = 0; i < extrinsics_.size(); i++) {
-    visualization_msgs::Marker & marker = msg.markers[i];
-    marker.header.frame_id = frame_child_ + "/light";
-    marker.header.stamp = ros::Time::now();
-    marker.ns = frame_child_;
-    marker.id = i;
-    marker.type = visualization_msgs::Marker::SPHERE;
-    marker.action = visualization_msgs::Marker::ADD;
-    marker.pose.position.x = extrinsics_[i](0);
-    marker.pose.position.y = extrinsics_[i](1);
-    marker.pose.position.z = extrinsics_[i](2);
-    marker.pose.orientation.x = 0.0;
-    marker.pose.orientation.y = 0.0;
-    marker.pose.orientation.z = 0.0;
-    marker.pose.orientation.w = 1.0;
-    marker.scale.x = 0.005;
-    marker.scale.y = 0.005;
-    marker.scale.z = 0.005;
-    marker.color.a = 1.0;
-    marker.color.r = 1.0;
-    marker.color.g = 0.0;
-    marker.color.b = 0.0;
-  }
-  pub_markers_.publish(msg);
 }
 
 // This will be called at approximately 120Hz
@@ -668,8 +638,6 @@ int main(int argc, char **argv) {
     sub_light = nh.subscribe("/light", 10, LightCallback);
 
   // Markers showing sensor positions
-  pub_markers_ = nh.advertise<visualization_msgs::MarkerArray>
-    (topic_sensors, 0);
   pub_pose_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>
     (topic_pose, 0);
   pub_twist_ = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>

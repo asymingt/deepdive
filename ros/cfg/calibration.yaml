@@ -23,18 +23,19 @@ frames:
   parent: "world"
   child: "body"
 
-# Threshold on light values
+# Threshold on light values (NOT USED RIGHT NOW)
 thresholds:
-  angle:                60.0       # In degrees
-  duration:             1.0        # In microseconds
-  correction:           0.1        # In seconds
+  count:                4          # Min pulses/sweep to add to solver
+  angle:                60.0       # Threshold on angle (in degres)
+  duration:             1.0        # Threshod on duration (in microsecs)
+  correction:           0.1        # Threshold on mapped time for correction
 
 # Apply light corrections broadcast over OOTX
-correct:                false
+correct:                false 
 
 # What to add to the non-linear solver
 refine:
-  extrinsics:           true       # If false tracker frame is the body frame
+  extrinsics:           false      # If false tracker frame is the body frame
   sensors:              false      # Refine sensor positions
   params:               false      # Refine lighthouse parameters
   head:                 false      # Refine head transform
@@ -48,6 +49,9 @@ solver:
   jacobian_threads:     16         # Number of jacobian threads
   debug:                true       # Provide debug output?
 
+# Publish rviz markers for the sensors
+visualize:              true
+
 # List of lighthouses to be included. They must be rigid with respect
 # to each other and the "parent" frame listed above.
 lighthouses:
@@ -59,4 +63,4 @@ lighthouses:
 # list. However, each tracker listed must
 trackers:
   - "LHR-09DF88FD"
-  - "LHR-1FC0DEF4"
+#  - "LHR-1FC0DEF4"
