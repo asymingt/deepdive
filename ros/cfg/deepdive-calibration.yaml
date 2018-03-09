@@ -31,7 +31,10 @@ thresholds:
   correction:           0.1        # Threshold on mapped time for correction
 
 # Apply light corrections broadcast over OOTX
-correct:                false 
+correct:                true 
+
+# Lock the Z coordinate of the body-frame (force solution on Z plane)
+force2d:                true
 
 # What else to refine, besides the lighthouse ans sensor positions
 refine:

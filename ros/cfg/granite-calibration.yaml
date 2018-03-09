@@ -33,6 +33,9 @@ thresholds:
 # Apply light corrections broadcast over OOTX
 correct:                false 
 
+# Lock the Z coordinate of the body-frame (force solution on Z plane)
+force2d:                true
+
 # What else to refine, besides the lighthouse ans sensor positions
 refine:
   extrinsics:           false      # If false tracker frame is the body frame
@@ -42,11 +45,11 @@ refine:
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
-  max_time:             60.0       # In seconds
-  max_iterations:       1000       # Number of iterations
+  max_time:             120.0      # In seconds
+  max_iterations:       500        # Number of iterations
   gradient_tolerance:   1.0e-10    # Gradient change threhsold
-  solver_threads:       4          # Number of lienar solver threads
-  jacobian_threads:     4          # Number of jacobian threads
+  solver_threads:       16         # Number of lienar solver threads
+  jacobian_threads:     16         # Number of jacobian threads
   debug:                true       # Provide debug output?
 
 # Publish rviz markers for the sensors

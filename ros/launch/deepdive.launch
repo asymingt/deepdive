@@ -6,6 +6,7 @@
   <arg name="record" default="" />
   <arg name="rviz" default="true" />
   <arg name="output" default="screen" />
+  <arg name="offline" default="false" />
 
   <!-- SUPPORT NODES -->
 
@@ -24,9 +25,11 @@
 
   <!-- CORE NODES -->
 
-  <!-- Bridge or bag replay, depending on arguments -->
+  <!-- Replay if needed, and speed up in an offline experiment by 10x -->
+  <arg if="$(eval arg('offline') != '')" name="factor" value="10" />
+  <arg unless="$(eval arg('offline') != '')" name="factor" value="1" />
   <node if="$(eval arg('replay') != '')" name="deepdive_player" output="$(arg output)"
-        pkg="rosbag" type="play" args="--clock $(arg replay)"/>
+        pkg="rosbag" type="play" args="--clock -r $(arg factor) $(arg replay)"/>
 
   <!-- One filter for each of the two trackers -->
   <!--
@@ -44,6 +47,7 @@
   <node name="deepdive_calibration" output="$(arg output)"
         pkg="deepdive_ros" type="deepdive_calibration">
     <rosparam command="load" file="$(find deepdive_ros)/cfg/calibration.yaml" />
+    <param name="offline" type="bool" value="$(arg offline)" />
   </node>
 
 </launch>
