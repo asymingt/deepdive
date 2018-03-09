@@ -28,7 +28,7 @@
   <!-- Replay if needed, and speed up in an offline experiment by 10x -->
   <arg if="$(eval arg('offline') != '')" name="factor" value="10" />
   <arg unless="$(eval arg('offline') != '')" name="factor" value="1" />
-  <node if="$(eval arg('replay') != '')" name="deepdive_player" output="$(arg output)"
+  <node if="$(eval arg('replay') != '')" name="deepdive_player" output="log"
         pkg="rosbag" type="play" args="--clock -d 1 -r $(arg factor) $(arg replay)"/>
 
   <!-- One filter for each of the two trackers -->

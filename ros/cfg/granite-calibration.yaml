@@ -25,7 +25,7 @@ frames:
 
 # Threshold on light values (NOT USED RIGHT NOW)
 thresholds:
-  count:                4          # Min pulses/sweep to add to solver
+  count:                1          # Min pulses/sweep to add to solver
   angle:                60.0       # Threshold on angle (in degres)
   duration:             1.0        # Threshod on duration (in microsecs)
   correction:           0.1        # Threshold on mapped time for correction

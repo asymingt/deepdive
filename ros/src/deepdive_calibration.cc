@@ -586,7 +586,7 @@ bool Solve() {
         ps.pose.orientation.x = q.x();
         ps.pose.orientation.y = q.y();
         ps.pose.orientation.z = q.z();
-        msg.poses.push_back(ps);    
+        msg.poses.push_back(ps);
       }
       pub_path_.publish(msg);
     }
