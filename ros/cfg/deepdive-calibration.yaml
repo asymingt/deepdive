@@ -62,13 +62,13 @@ lighthouses:
 # other and the body being tracked. You can put as many as you'd like in this
 # list. However, each tracker listed must have an associates
 trackers:
-  - "tracker_port"
-  - "tracker_stbd"
+  - "tracker_a"
+  - "tracker_b"
 
-tracker_port:
+tracker_a:
   serial: "LHR-09DF88FD"
   extrinsics: [0, 0, 0, 0, 0, 0, 1]
 
-tracker_stbd:
+tracker_b:
   serial: "LHR-1FC0DEF4"
   extrinsics: [0, 0, 0, 0, 0, 0, 1]

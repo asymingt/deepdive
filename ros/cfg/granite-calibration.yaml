@@ -1,0 +1,74 @@
+# CALIBRATION PARAMETERS
+#
+# The calibration node is responsible for estimating and maintaining the
+# fixed transforms from the world to lighthouse, and from the set of
+# rigidly connected trackers to what we consider to be the body frame. It
+# does so by framing the localization problem as least-square error
+# minimization over a connected graph
+#
+# Our approach uses only light measurements and pose corrections to solve
+# for the lighthouse positions in the world frame and the transforms of
+# the trackers (mechanical frame) with respect to the body frame..
+#
+# If the calibration procedure works as expected, we'll have a set of
+# lighthouse -> world and tracker -> tracker/body transforms. We'll then
+# write these to a calibration file, which is written to the default ROS
+# working directory (~/.ros) and persisted across restarts.
+
+cfgfile: "calibration.tf2"
+
+# The parent frame must match the parent frame specified in the individual
+# tracker configuration files.
+frames:
+  parent: "world"
+  child: "body"
+
+# Threshold on light values (NOT USED RIGHT NOW)
+thresholds:
+  count:                4          # Min pulses/sweep to add to solver
+  angle:                60.0       # Threshold on angle (in degres)
+  duration:             1.0        # Threshod on duration (in microsecs)
+  correction:           0.1        # Threshold on mapped time for correction
+
+# Apply light corrections broadcast over OOTX
+correct:                false 
+
+# What else to refine, besides the lighthouse ans sensor positions
+refine:
+  extrinsics:           false      # If false tracker frame is the body frame
+  sensors:              false      # Refine sensor positions
+  params:               false      # Refine lighthouse parameters
+  head:                 false      # Refine head transform
+
+# These are the parameters used by the non-linear least squares optimizer
+solver:
+  max_time:             60.0       # In seconds
+  max_iterations:       1000       # Number of iterations
+  gradient_tolerance:   1.0e-10    # Gradient change threhsold
+  solver_threads:       4          # Number of lienar solver threads
+  jacobian_threads:     4          # Number of jacobian threads
+  debug:                true       # Provide debug output?
+
+# Publish rviz markers for the sensors
+visualize:              true
+
+# List of lighthouses to be included. They must be rigid with respect
+# to each other and the "parent" frame listed above.
+lighthouses:
+  - "2935772913"
+  - "668207140"
+
+# List of trackers to be included. They must be rigid with respect to each
+# other and the body being tracked. You can put as many as you'd like in this
+# list. However, each tracker listed must have an associates
+trackers:
+  - "tracker_port"
+  - "tracker_stbd"
+
+tracker_port:
+  serial: "LHR-08DE340B"
+  extrinsics: [0.000, -0.1425, -0.162,  0.7071, 0, 0, 0.7071]
+
+tracker_stbd:
+  serial: "LHR-08DDBC05"
+  extrinsics: [0.000,  0.1425, -0.162, -0.7071, 0, 0, 0.7071]

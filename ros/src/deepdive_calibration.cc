@@ -205,7 +205,6 @@ int WriteConfig() {
 
 void Publish() {
   geometry_msgs::TransformStamped tfs;
-  tfs.header.stamp = ros::Time::now();
   // Publish lighthouse positions
   std::map<std::string, Lighthouse>::iterator it;
   for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
@@ -216,6 +215,7 @@ void Publish() {
       aa.axis() = v.normalized();
     }
     Eigen::Quaterniond q(aa);
+    tfs.header.stamp = ros::Time::now();
     tfs.header.frame_id = frame_parent_;
     tfs.child_frame_id = it->first;
     tfs.transform.translation.x = it->second.wTl[0];
@@ -237,7 +237,8 @@ void Publish() {
       aa.axis() = v.normalized();
     }
     Eigen::Quaterniond q(aa);
-    tfs.header.frame_id = jt->first + "/" + frame_child_;
+    tfs.header.stamp = ros::Time::now();
+    tfs.header.frame_id = frame_child_;
     tfs.child_frame_id = jt->first;
     tfs.transform.translation.x = jt->second.bTh[0];
     tfs.transform.translation.y = jt->second.bTh[1];
@@ -550,18 +551,24 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
   for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
     if (trackers_.find(it->serial) == trackers_.end())
       return;
-    // COnvert to an angle-axis representation
+    // Convert to an angle-axis representation
     Eigen::Quaterniond q(
       it->head_transform.rotation.w,
       it->head_transform.rotation.x,
       it->head_transform.rotation.y,
       it->head_transform.rotation.z);
     Eigen::AngleAxisd aa(q);
+    Eigen::Affine3d tTh;
+    tTh.linear() = q.toRotationMatrix();
+    tTh.translation() = Eigen::Vector3d(
+      it->head_transform.translation.x,
+      it->head_transform.translation.y,
+      it->head_transform.translation.z);
     // Modify the tracker
     Tracker & tracker = trackers_[it->serial];
-    tracker.tTh[0] = it->head_transform.translation.x;
-    tracker.tTh[1] = it->head_transform.translation.y;
-    tracker.tTh[2] = it->head_transform.translation.z;
+    tracker.tTh[0] = tTh.translation()[0];
+    tracker.tTh[1] = tTh.translation()[1];
+    tracker.tTh[2] = tTh.translation()[2];
     tracker.tTh[3] = aa.angle() * aa.axis()[0];
     tracker.tTh[4] = aa.angle() * aa.axis()[1];
     tracker.tTh[5] = aa.angle() * aa.axis()[2];
@@ -573,11 +580,20 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
       tracker.sensors[6*i+4] = it->sensors[i].normal.y;
       tracker.sensors[6*i+5] = it->sensors[i].normal.z;
     }
+    // Invert the transformation retain frame hierarchy in TF2
+    Eigen::Affine3d hTt = tTh.inverse();
+    q = Eigen::Quaterniond(hTt.linear());
     // Add the transforms
     geometry_msgs::TransformStamped tfs;
-    tfs.header.frame_id = it->serial + "/light";
-    tfs.child_frame_id = it->serial;
-    tfs.transform = it->head_transform;
+    tfs.header.frame_id = it->serial;
+    tfs.child_frame_id = it->serial + "/light";
+    tfs.transform.translation.x = hTt.translation()[0];
+    tfs.transform.translation.y = hTt.translation()[1];
+    tfs.transform.translation.z = hTt.translation()[2];
+    tfs.transform.rotation.w = q.w();
+    tfs.transform.rotation.x = q.x();
+    tfs.transform.rotation.y = q.y();
+    tfs.transform.rotation.z = q.z();
     SendStaticTransform(tfs);
     tfs.header.frame_id = it->serial + "/light";
     tfs.child_frame_id = it->serial + "/imu";
@@ -808,10 +824,10 @@ int main(int argc, char **argv) {
   int n = ReadConfig();
   if (n == lighthouses_.size()) {
     ROS_INFO_STREAM("Read " << n << " lighthouse transforms from calibration");
-    Publish();
   } else {
     ROS_INFO_STREAM("Could not read calibration file");
   }
+  Publish();
 
   // Block until safe shutdown
   ros::spin();

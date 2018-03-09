@@ -240,6 +240,18 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "deepdive_fusion");
   ros::NodeHandle nh("~");
 
+  // Eigen uses [w, x, y, z]
+  Eigen::Quaterniond q(.7071, 0, 0, .7071);
+  Eigen::Matrix3d mat = q.toRotationMatrix().inverse();
+  for (size_t r = 0; r < 3; r++)
+    for (size_t c = 0; c < 3; c++)
+      ROS_INFO_STREAM("(" << r << ", " << c << ") " << mat(r,c));
+  Eigen::Vector3d sol = mat * Eigen::Vector3d(1.0, 0.0, 0.0);
+  ROS_INFO_STREAM(sol[0]);
+  ROS_INFO_STREAM(sol[1]);
+  ROS_INFO_STREAM(sol[2]);
+
+
   // Get the parent information
   std::vector<std::string> parents;
   if (!nh.getParam("parents", parents))
