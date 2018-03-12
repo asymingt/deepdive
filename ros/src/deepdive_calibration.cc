@@ -598,7 +598,7 @@ bool Solve() {
     // Publish the new solution
     Publish();
     // Write the solution to a config file
-    // WriteConfig();
+    WriteConfig();
     // Print the trajectory of the body-frame in the world-frame
     if (visualize_) {
       nav_msgs::Path msg;
