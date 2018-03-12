@@ -17,7 +17,7 @@
   <!-- Data recorder, if needed -->
   <node if="$(eval arg('record') != '')" name="deepdive_recorder" output="$(arg output)"
         pkg="rosbag" type="record"
-        args="-O $(arg record) /trackers /lighthouses /imu /light /button"/>
+        args="-O $(arg record) /trackers /lighthouses /imu /light /button /tf"/>
 
   <!-- Data replay, if needed -->
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"

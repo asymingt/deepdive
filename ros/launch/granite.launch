@@ -17,7 +17,7 @@
   <!-- Data recorder, if needed -->
   <node if="$(eval arg('record') != '')" name="deepdive_recorder" output="$(arg output)"
         pkg="rosbag" type="record"
-        args="-O $(arg record) /trackers /lighthouses /imu /light /button"/>
+        args="-O $(arg record) /trackers /lighthouses /imu /light /button /tf"/>
 
   <!-- Data replay, if needed -->
   <node unless="$(eval arg('replay') != '')" name="deepdive_bridge"
@@ -33,7 +33,6 @@
 
   <!-- One filter for each of the two trackers -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="rviz_bc" args="0 0 0 1 0 0 0 world rviz" />
-  <node pkg="tf2_ros" type="static_transform_publisher" name="body_bc" args="0 0 0 0 0 0 1 world body" />
 
   <!--
   <node name="deepdive_tracker_port" output="$(arg output)"
