@@ -53,7 +53,9 @@ ros::Publisher pub_button_;
 ros::Publisher pub_light_;
 ros::Publisher pub_imu_;
 
-// Convert time an return overflow count
+// Convert time an return overflow count - this is an okay way of extracting
+// an accurate time in seconds. However, it assigns an arbitrary time to the
+// data, which makes it inherently incompatible with other ROS packages.
 ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
   // How many seconds in each overflow cycle of the counter
   static uint32_t ticks_per_period = std::numeric_limits<uint32_t>::max();
@@ -89,7 +91,7 @@ void LightCallback(struct Tracker * tracker,
   uint32_t *angles, uint16_t *lengths) {
   static deepdive_ros::Light msg;
   msg.header.frame_id = tracker->serial;
-  msg.header.stamp = TimeConvert(tracker->serial, synctime);
+  msg.header.stamp = ros::Time::now();
   msg.lighthouse = lighthouse->serial;
   msg.axis = axis;
   msg.pulses.resize(num_sensors);
@@ -110,7 +112,7 @@ void ImuCallback(struct Tracker * tracker, uint32_t timecode,
   // Package up the IMU data
   static sensor_msgs::Imu msg;
   msg.header.frame_id = tracker->serial;
-  msg.header.stamp = TimeConvert(tracker->serial, timecode);
+  msg.header.stamp = ros::Time::now();
   msg.linear_acceleration.x =
     static_cast<double>(acc[0]) * GRAVITY / ACC_SCALE;
   msg.linear_acceleration.y =
