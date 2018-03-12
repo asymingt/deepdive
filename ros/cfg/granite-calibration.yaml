@@ -20,10 +20,10 @@ cfgfile: "calibration.tf2"
 # The parent frame must match the parent frame specified in the individual
 # tracker configuration files.
 frames:
-  parent: "world"
-  child: "body"
+  parent:               "world"
+  child:                "body"
 
-# Threshold on light values (NOT USED RIGHT NOW)
+# Threshold on light values
 thresholds:
   count:                4          # Min pulses/sweep to add to solver
   angle:                60.0       # Threshold on angle (in degres)
@@ -45,13 +45,13 @@ refine:
 
 # Relative weighting of measurements
 weight:
-  light:                1.0
   correction:           1.0
+  light:                10.0
   motion:               100.0
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
-  max_time:             60.0       # In seconds
+  max_time:             120.0      # In seconds
   max_iterations:       1000       # Number of iterations
   function_tolerance:   1.0e-06    # Function tolerance
   gradient_tolerance:   1.0e-12    # Gradient change threhsold

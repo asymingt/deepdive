@@ -536,10 +536,6 @@ bool Solve() {
       // Find the closest measurement time to this correction time
       mt = measurements_.lower_bound(kt->header.stamp);
       if (mt == measurements_.end()) {
-        ROS_WARN("Correction discarded, as no matching timestamp");
-        ROS_WARN_STREAM("N: " << kt->header.stamp);
-        ROS_WARN_STREAM("B: " << measurements_.begin()->first);
-        ROS_WARN_STREAM("E: " << measurements_.rbegin()->first);
         continue;
       } else if (mt != measurements_.begin()) {
         mt_p = std::prev(mt);
@@ -547,11 +543,10 @@ bool Solve() {
           mt = mt_p;
       }
       if ((kt->header.stamp - mt->first).toSec() > thresh_correction_) {
-        ROS_WARN("Correction discarded based on threshold");
+        ROS_WARN_THROTTLE(1.0, "Correction discarded based on threshold");
         continue;
       }
       // Add the height data from the measurement
-      ROS_INFO_STREAM("Added height of " << kt->transform.translation.z);
       height += kt->transform.translation.z;
       hcount += 1.0;
       // Add the cost function
