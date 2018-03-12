@@ -96,6 +96,11 @@ double thresh_angle_ = 60.0;
 double thresh_duration_ = 1.0;
 double thresh_correction_ = 0.1;
 
+// What to weight motion cost relative to the other errors
+double weight_light_ = 1.0;
+double weight_correction_ = 1.0;
+double weight_motion_ = 100.0;
+
 // Solver parameters
 ceres::Solver::Options options_;
 
@@ -349,6 +354,9 @@ struct LightCost {
       // The residual angle error for the specific axis
       residual[i] = angle[a] - T(light_.pulses[i].angle);
     }
+    // Apply the weightind
+    for (size_t i = 0; i < light_.pulses.size(); i++)
+      residual[i] *= T(weight_light_);
     // Everything went well
     return true;
   }
@@ -377,8 +385,48 @@ struct MotionCost {
     residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
     residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
     residual[5] =  prev_rot_z[0] - next_rot_z[0];
+    for (size_t i = 0; i < 6; i++)
+      residual[i] *= T(weight_motion_);
     return true;
   }
+};
+
+// Correct a state estimate with
+struct CorrectionCost {
+  explicit CorrectionCost(geometry_msgs::TransformStamped const& correction) {
+    Eigen::Quaterniond q(
+      correction.transform.rotation.w,
+      correction.transform.rotation.x,
+      correction.transform.rotation.y,
+      correction.transform.rotation.z);
+    Eigen::AngleAxisd aa(q);
+    wTb_[0] = correction.transform.translation.x;
+    wTb_[1] = correction.transform.translation.y;
+    wTb_[2] = correction.transform.translation.z;
+    wTb_[3] = aa.angle() * aa.axis()[0];
+    wTb_[4] = aa.angle() * aa.axis()[1];
+    wTb_[5] = aa.angle() * aa.axis()[2];
+  }
+  // Called by ceres-solver to calculate error
+  template <typename T>
+  bool operator()(const T* const pos_xy,  // Body -> world (pos xy)
+                  const T* const pos_z,   // Body -> world (pos z)
+                  const T* const rot_xy,  // Body -> world (rot xy)
+                  const T* const rot_z,   // Body -> world (rot z)
+                  T* residual) const {
+    residual[0] =  pos_xy[0] - wTb_[0];
+    residual[1] =  pos_xy[1] - wTb_[1];
+    residual[2] =  pos_z[0] - wTb_[2];
+    residual[3] =  rot_xy[0] - wTb_[3];
+    residual[4] =  rot_xy[1] - wTb_[4];
+    residual[5] =  rot_z[0] - wTb_[5];
+    // Apply the weightind
+    for (size_t i = 0; i < 6; i++)
+      residual[i] *= T(weight_correction_);
+    return true;
+  }
+ private:
+  double wTb_[6];
 };
 
 bool Solve() {
@@ -455,8 +503,8 @@ bool Solve() {
       ROS_INFO_STREAM("- ID " << jt->first << ": " << t_tally[jt->first]);
   }
 
-  // If there are no corections then we'll define the first coordinate as the
-  // coordinate to use
+  // If there are no corections then we'll set the initial and final positions
+  // to the identity. This is not the best way to do this.
   double height = 0.0;
   if (corrections_.empty()) {
     ROS_INFO("No corrections, so locking inital and final pose to origin");
@@ -497,26 +545,15 @@ bool Solve() {
         ROS_WARN("Correction discarded, as no matching timestamp");
         continue;
       }
-      // Set the value of the body at the time of the measurement
-      Eigen::Quaterniond q(
-        kt->transform.rotation.w,
-        kt->transform.rotation.x,
-        kt->transform.rotation.y,
-        kt->transform.rotation.z);
-      Eigen::AngleAxisd aa(q);
-      mt->second.wTb[0] = kt->transform.translation.x;
-      mt->second.wTb[1] = kt->transform.translation.y;
-      mt->second.wTb[2] = kt->transform.translation.z;
-      mt->second.wTb[3] = aa.angle() * aa.axis()[0];
-      mt->second.wTb[4] = aa.angle() * aa.axis()[1];
-      mt->second.wTb[5] = aa.angle() * aa.axis()[2];
-      // Set the average height
-      height += mt->second.wTb[2];
-      // Correction is just a constant parameter block with known value
-      problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[0]);
-      problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[2]);
-      problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[3]);
-      problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[5]);
+      // Add the cost function
+      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
+        CorrectionCost, 6, 2, 1, 2, 1>(new CorrectionCost(*kt));
+      // Add the residual block
+      problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+        reinterpret_cast<double*>(&mt->second.wTb[0]),    // pos: xy
+        reinterpret_cast<double*>(&mt->second.wTb[2]),    // pos: z
+        reinterpret_cast<double*>(&mt->second.wTb[3]),    // rot: xy
+        reinterpret_cast<double*>(&mt->second.wTb[5]));   // rot: z
     }
     // Get the mean height
     height /= static_cast<double>(corrections_.size());
@@ -759,10 +796,18 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   measurements_[msg->header.stamp].light = data;
 }
 
-void CorrectionCallback(geometry_msgs::TransformStamped::ConstPtr const& msg) {
+void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
   // Check that we are recording and that the tracker/lighthouse is ready
-  if (!recording_) return;
-  corrections_.push_back(*msg);
+  if (!recording_)
+    return;
+  std::vector<geometry_msgs::TransformStamped>::const_iterator it;
+  for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
+    if (it->header.frame_id == frame_parent_ &&
+        it->child_frame_id == frame_child_) {
+      ROS_INFO_THROTTLE(1, "Found a correction");
+      corrections_.push_back(*it);
+    }
+  }
 }
 
 bool TriggerCallback(std_srvs::Trigger::Request  &req,
@@ -843,6 +888,14 @@ int main(int argc, char **argv) {
   if (!nh.getParam("refine/params", refine_params_))
     ROS_FATAL("Failed to get refine/params parameter.");
 
+  // What weights to use
+  if (!nh.getParam("weight/light", weight_light_))
+    ROS_FATAL("Failed to get weight/light parameter.");
+  if (!nh.getParam("weight/correction", weight_correction_))
+    ROS_FATAL("Failed to get weight/correction parameter.");
+  if (!nh.getParam("weight/motion", weight_motion_))
+    ROS_FATAL("Failed to get weight/motion parameter.");
+
   // Whether to apply light corrections
   if (!nh.getParam("correct", correct_))
     ROS_FATAL("Failed to get correct parameter.");
@@ -864,6 +917,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get the solver/solver_threads parameter.");
   if (!nh.getParam("solver/jacobian_threads", options_.num_threads))
     ROS_FATAL("Failed to get the solver/jacobian_threads parameter.");
+  if (!nh.getParam("solver/function_tolerance", options_.function_tolerance))
+    ROS_FATAL("Failed to get the solver/function_tolerance parameter.");
   if (!nh.getParam("solver/gradient_tolerance", options_.gradient_tolerance))
     ROS_FATAL("Failed to get the solver/gradient_tolerance parameter.");
   if (!nh.getParam("solver/debug", options_.minimizer_progress_to_stdout))
@@ -920,7 +975,7 @@ int main(int argc, char **argv) {
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
   ros::Subscriber sub_corrections =
-    nh.subscribe("/corrections", 1000, CorrectionCallback);
+    nh.subscribe("/tf", 1000, CorrectionCallback);
   ros::ServiceServer service =
     nh.advertiseService("/trigger", TriggerCallback);
 
