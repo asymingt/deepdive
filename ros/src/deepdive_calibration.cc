@@ -74,7 +74,7 @@ struct Measurement {
 std::map<ros::Time, Measurement> measurements_;
 
 // Corrections
-std::vector<geometry_msgs::TransformStamped> corrections_;
+std::map<ros::Time, geometry_msgs::TransformStamped> corrections_;
 
 // Global strings
 std::string cfgfile_ = "deepdive.tf2";
@@ -85,6 +85,7 @@ std::string frame_child_ = "body";
 bool correct_ = false;
 
 // What to solve for
+bool refine_trajectory_ = false;
 bool refine_extrinsics_ = false;
 bool refine_sensors_ = false;
 bool refine_head_ = false;
@@ -345,18 +346,15 @@ struct LightCost {
       // meaning of the calibration parameters based on their name. It might
       // be the case that these value are subtracted, rather than added.
       if (correct_) { 
-        angle[a] += T(params[CAL_PHASE]);
-        angle[a] += T(params[CAL_TILT]) * angle[1-a];
-        angle[a] += T(params[CAL_CURVE]) * angle[1-a] * angle[1-a];
-        angle[a] += T(params[CAL_GIB_MAG])
+        angle[a] -= T(params[CAL_PHASE]);
+        angle[a] -= T(params[CAL_TILT]) * angle[1-a];
+        angle[a] -= T(params[CAL_CURVE]) * angle[1-a] * angle[1-a];
+        angle[a] -= T(params[CAL_GIB_MAG])
                      * cos(angle[1-a] + T(params[CAL_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
       residual[i] = angle[a] - T(light_.pulses[i].angle);
     }
-    // Apply the weightind
-    for (size_t i = 0; i < light_.pulses.size(); i++)
-      residual[i] *= T(weight_light_);
     // Everything went well
     return true;
   }
@@ -365,127 +363,122 @@ struct LightCost {
   deepdive_ros::Light light_;
 };
 
-// Residual error between predicted anfgles to a lighthouse
-struct MotionCost {
-  explicit MotionCost() {}
-  // Called by ceres-solver to calculate error
-  template <typename T>
-  bool operator()(const T* const prev_pos_xy,  // PREV Body -> world (pos xy)
-                  const T* const prev_pos_z,   // PREV Body -> world (pos z)
-                  const T* const prev_rot_xy,  // PREV Body -> world (rot xy)
-                  const T* const prev_rot_z,   // PREV Body -> world (rot z)
-                  const T* const next_pos_xy,  // NEXT Body -> world (pos xy)
-                  const T* const next_pos_z,   // NEXT Body -> world (pos z)
-                  const T* const next_rot_xy,  // NEXT Body -> world (rot xy)
-                  const T* const next_rot_z,   // NEXT Body -> world (rot z)
-                  T* residual) const {
-    residual[0] =  prev_pos_xy[0] - next_pos_xy[0];
-    residual[1] =  prev_pos_xy[1] - next_pos_xy[1];
-    residual[2] =  prev_pos_z[0] - next_pos_z[0];
-    residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
-    residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
-    residual[5] =  prev_rot_z[0] - next_rot_z[0];
-    for (size_t i = 0; i < 6; i++)
-      residual[i] *= T(weight_motion_);
-    return true;
-  }
-};
-
-// Correct a state estimate with
-struct CorrectionCost {
-  explicit CorrectionCost(geometry_msgs::TransformStamped const& correction) {
-    Eigen::Quaterniond q(
-      correction.transform.rotation.w,
-      correction.transform.rotation.x,
-      correction.transform.rotation.y,
-      correction.transform.rotation.z);
-    Eigen::AngleAxisd aa(q);
-    wTb_[0] = correction.transform.translation.x;
-    wTb_[1] = correction.transform.translation.y;
-    wTb_[2] = correction.transform.translation.z;
-    wTb_[3] = aa.angle() * aa.axis()[0];
-    wTb_[4] = aa.angle() * aa.axis()[1];
-    wTb_[5] = aa.angle() * aa.axis()[2];
-  }
-  // Called by ceres-solver to calculate error
-  template <typename T>
-  bool operator()(const T* const pos_xy,  // Body -> world (pos xy)
-                  const T* const pos_z,   // Body -> world (pos z)
-                  const T* const rot_xy,  // Body -> world (rot xy)
-                  const T* const rot_z,   // Body -> world (rot z)
-                  T* residual) const {
-    residual[0] =  pos_xy[0] - wTb_[0];
-    residual[1] =  pos_xy[1] - wTb_[1];
-    residual[2] =  pos_z[0] - wTb_[2];
-    residual[3] =  rot_xy[0] - wTb_[3];
-    residual[4] =  rot_xy[1] - wTb_[4];
-    residual[5] =  rot_z[0] - wTb_[5];
-    // Apply the weightind
-    for (size_t i = 0; i < 6; i++)
-      residual[i] *= T(weight_correction_);
-    return true;
-  }
- private:
-  double wTb_[6];
-};
-
 bool Solve() {
   // Create the ceres problem
   ceres::Problem problem;
 
-  // Add the measurements
+  // Check that we have enough measurements
   if (measurements_.empty()) {
     ROS_WARN("No measurements received, so cannot solve the problem.");
     return false;
   } else {
-    ROS_INFO_STREAM("Processing " << measurements_.size() << " measurements");
+    double t = (measurements_.rbegin()->first
+      - measurements_.begin()->first).toSec();
+    ROS_INFO_STREAM("Processing " << measurements_.size()
+      << " measurements running for " << t << " seconds from "
+      << measurements_.begin()->first << " to "
+      << measurements_.rbegin()->first);
   }
-  std::map<ros::Time, Measurement>::iterator mt, mt_p;
+
+  // Create a correction if required
+  if (corrections_.empty()) {
+    ROS_INFO("No corrections, so locking initial pose to origin");
+    geometry_msgs::TransformStamped tfs;
+    tfs.header.stamp = measurements_.begin()->first;
+    tfs.header.frame_id = frame_parent_;
+    tfs.child_frame_id = frame_child_;
+    tfs.transform.translation.x = 0.0;
+    tfs.transform.translation.y = 0.0;
+    tfs.transform.translation.z = 0.0;
+    tfs.transform.rotation.w = 1.0;
+    tfs.transform.rotation.x = 0.0;
+    tfs.transform.rotation.y = 0.0;
+    tfs.transform.rotation.z = 0.0;
+    corrections_[measurements_.begin()->first] = tfs;
+  } else {
+    double t = (corrections_.rbegin()->first
+      - corrections_.begin()->first).toSec();
+    ROS_INFO_STREAM("Processing " << corrections_.size()
+      << " corrections running for " << t << " seconds from "
+      << corrections_.begin()->first << " to "
+      << corrections_.rbegin()->first);
+  }
+
+  // Tally the lighthouse and tracker measurements
   std::map<std::string, size_t> l_tally;
   std::map<std::string, size_t> t_tally;
-  for (mt = measurements_.begin(); mt != measurements_.end(); mt++) {
+
+  // Calculate the average height if needed
+  double height = 0.0;
+  double hcount = 0.0;
+
+  // Store the transforms
+  std::map<ros::Time, double[6]> wTb;
+
+  // Iterate over corrections
+  std::map<ros::Time, geometry_msgs::TransformStamped>::iterator kt, kt_p;
+  for (kt = corrections_.begin(); kt != corrections_.end(); kt++) {
+    // Avoid super high freuqency samples
+    if (kt != corrections_.begin())
+      if ((kt->first - kt_p->first).toSec() < 0.1)
+        continue;
+    kt_p = kt;
+    // Find the closest measurement to this correction and use it
+    std::map<ros::Time, Measurement>::iterator mt, mt_p;
+    mt = measurements_.lower_bound(kt->first);
+    if (mt == measurements_.end())
+      continue;
+    if (mt != measurements_.begin()) {
+      mt_p = std::prev(mt);
+      if (kt->first - mt_p->first < mt->first - kt->first)
+        mt = mt_p;
+    }
+    if (fabs((kt->first - mt->first).toSec()) > thresh_correction_)
+      continue;
+    // Set the default value
+    Eigen::Quaterniond q(
+      kt->second.transform.rotation.w,
+      kt->second.transform.rotation.x,
+      kt->second.transform.rotation.y,
+      kt->second.transform.rotation.z);
+    Eigen::AngleAxisd aa(q);
+    wTb[kt->first][0] = kt->second.transform.translation.x;
+    wTb[kt->first][1] = kt->second.transform.translation.y;
+    wTb[kt->first][2] = kt->second.transform.translation.z;
+    wTb[kt->first][3] = aa.angle() * aa.axis()[0];
+    wTb[kt->first][4] = aa.angle() * aa.axis()[1];
+    wTb[kt->first][5] = aa.angle() * aa.axis()[2];
     // Get references to the lighthouse, tracker and axis
     Tracker & tracker = trackers_[mt->second.light.header.frame_id];
     Lighthouse & lighthouse = lighthouses_[mt->second.light.lighthouse];
     size_t axis = mt->second.light.axis;
-
     // Register that we have received from this lighthouse
     l_tally[mt->second.light.lighthouse]++;
     t_tally[mt->second.light.header.frame_id]++;
-
     // Add the cost function
     ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<LightCost,
       ceres::DYNAMIC, 6, 2, 1, 2, 1, 6, 6, NUM_SENSORS * 6, NUM_PARAMS>(
         new LightCost(mt->second.light), mt->second.light.pulses.size());
-
     // Add the residual block
     problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
       reinterpret_cast<double*>(lighthouse.wTl),
-      reinterpret_cast<double*>(&mt->second.wTb[0]),  // pos: xy
-      reinterpret_cast<double*>(&mt->second.wTb[2]),  // pos: z
-      reinterpret_cast<double*>(&mt->second.wTb[3]),  // rot: xy
-      reinterpret_cast<double*>(&mt->second.wTb[5]),  // rot: z
+      reinterpret_cast<double*>(&wTb[kt->first][0]),  // pos: xy
+      reinterpret_cast<double*>(&wTb[kt->first][2]),  // pos: z
+      reinterpret_cast<double*>(&wTb[kt->first][3]),  // rot: xy
+      reinterpret_cast<double*>(&wTb[kt->first][5]),  // rot: z
       reinterpret_cast<double*>(tracker.bTh),
       reinterpret_cast<double*>(tracker.tTh),
       reinterpret_cast<double*>(tracker.sensors),
       reinterpret_cast<double*>(lighthouse.params[axis]));
-
-    // If we are not on the first pose, then create a motion cost
-    if (mt != measurements_.begin()) {
-      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-        <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
-      problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-        reinterpret_cast<double*>(&std::prev(mt)->second.wTb[0]),   // pos: xy
-        reinterpret_cast<double*>(&std::prev(mt)->second.wTb[2]),   // pos: z
-        reinterpret_cast<double*>(&std::prev(mt)->second.wTb[3]),   // rot: xy
-        reinterpret_cast<double*>(&std::prev(mt)->second.wTb[5]),   // rot: z
-        reinterpret_cast<double*>(&mt->second.wTb[0]),              // pos: xy
-        reinterpret_cast<double*>(&mt->second.wTb[2]),              // pos: z
-        reinterpret_cast<double*>(&mt->second.wTb[3]),              // rot: xy
-        reinterpret_cast<double*>(&mt->second.wTb[5]));             // rot: z
-    }
+    // Add the height data from the measurement
+    height += kt->second.transform.translation.z;
+    hcount += 1.0;
   }
 
+  // Get the mean height
+  height = (hcount > 0 ? height / hcount : 0.0);
+
+  // Print out how much data we received
   if (l_tally.size() != lighthouses_.size()) {
     ROS_WARN("We didn't receive data from all lighthouses. Aborting");
     return false;
@@ -503,79 +496,33 @@ bool Solve() {
       ROS_INFO_STREAM("- ID " << jt->first << ": " << t_tally[jt->first]);
   }
 
-  // If there are no corections then we'll set the initial and final positions
-  // to the identity. This is not the best way to do this.
-  double height = 0.0;
-  double hcount = 0.0;
-  if (corrections_.empty()) {
-    ROS_INFO("No corrections, so locking inital and final pose to origin");
-    measurements_.begin()->second.wTb[0] = 0.0;
-    measurements_.begin()->second.wTb[1] = 0.0;
-    measurements_.begin()->second.wTb[2] = 0.0;
-    measurements_.begin()->second.wTb[3] = 0.0;
-    measurements_.begin()->second.wTb[4] = 0.0;
-    measurements_.begin()->second.wTb[5] = 0.0;
-    problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[0]);
-    problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[2]);
-    problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[3]);
-    problem.SetParameterBlockConstant(&measurements_.begin()->second.wTb[5]);
-    measurements_.rbegin()->second.wTb[0] = 0.0;
-    measurements_.rbegin()->second.wTb[1] = 0.0;
-    measurements_.rbegin()->second.wTb[2] = 0.0;
-    measurements_.rbegin()->second.wTb[3] = 0.0;
-    measurements_.rbegin()->second.wTb[4] = 0.0;
-    measurements_.rbegin()->second.wTb[5] = 0.0;
-    problem.SetParameterBlockConstant(&measurements_.rbegin()->second.wTb[0]);
-    problem.SetParameterBlockConstant(&measurements_.rbegin()->second.wTb[2]);
-    problem.SetParameterBlockConstant(&measurements_.rbegin()->second.wTb[3]);
-    problem.SetParameterBlockConstant(&measurements_.rbegin()->second.wTb[5]);
-  } else {
-    ROS_INFO_STREAM("Applying " << corrections_.size() << " corrections");
-    std::vector<geometry_msgs::TransformStamped>::iterator kt;
-    for (kt = corrections_.begin(); kt != corrections_.end(); kt++) {
-      // Find the closest measurement time to this correction time
-      mt = measurements_.lower_bound(kt->header.stamp);
-      if (mt == measurements_.end()) {
-        continue;
-      } else if (mt != measurements_.begin()) {
-        mt_p = std::prev(mt);
-        if (kt->header.stamp - mt_p->first < mt->first - kt->header.stamp)
-          mt = mt_p;
+  // If we want the trajectory refined at the same time as the lighthouse
+  // positions. This is completely optional
+  if (refine_trajectory_) {
+    // In 2D mode we lock the roll and pitch to zero and the height to some
+    // fixed value. If we had no corrections the height is zero, otherwise
+    // we take the  mean height over all correction values 
+    if (force2d_) {
+      ROS_INFO_STREAM("Trajectory refined in 2D with fixed height " << height);
+      std::map<ros::Time, double[6]>::iterator it;
+      for (it = wTb.begin(); it != wTb.end(); it++) {
+        it->second[2] = height;   // Height
+        problem.SetParameterBlockConstant(&it->second[2]);
+        it->second[3] = 0.0;      // Roll
+        it->second[4] = 0.0;      // Pitch
+        problem.SetParameterBlockConstant(&it->second[3]);
       }
-      if ((kt->header.stamp - mt->first).toSec() > thresh_correction_) {
-        ROS_WARN_THROTTLE(1.0, "Correction discarded based on threshold");
-        continue;
-      }
-      // Add the height data from the measurement
-      height += kt->transform.translation.z;
-      hcount += 1.0;
-      // Add the cost function
-      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
-        CorrectionCost, 6, 2, 1, 2, 1>(new CorrectionCost(*kt));
-      // Add the residual block
-      problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-        reinterpret_cast<double*>(&mt->second.wTb[0]),    // pos: xy
-        reinterpret_cast<double*>(&mt->second.wTb[2]),    // pos: z
-        reinterpret_cast<double*>(&mt->second.wTb[3]),    // rot: xy
-        reinterpret_cast<double*>(&mt->second.wTb[5]));   // rot: z
+    } else {
+      ROS_INFO("Trajectory refined in 3D");
     }
-    // Get the mean height
-    height = (hcount > 0 ? height / hcount : 0.0);
-  }
-
-  // In 2D mode we lock the roll and pitch to zero and the height to some fixed
-  // value. If we had no corrections the height is zero, otherwise we take the
-  // mean height over all correction values
-  if (force2d_) {
-    ROS_INFO_STREAM("Locking to 2D with fixed body height as " << height);
-    for (mt = measurements_.begin(); mt != measurements_.end(); mt++) {
-      if (force2d_) {
-        mt->second.wTb[2] = height;   // Height
-        problem.SetParameterBlockConstant(&mt->second.wTb[2]);
-        mt->second.wTb[3] = 0.0;      // Roll
-        mt->second.wTb[4] = 0.0;      // Pitch
-        problem.SetParameterBlockConstant(&mt->second.wTb[3]);
-      }
+  } else {
+    ROS_INFO("Trajectory not refined");
+    std::map<ros::Time, double[6]>::iterator it;
+    for (it = wTb.begin(); it != wTb.end(); it++) {
+      problem.SetParameterBlockConstant(&it->second[0]);
+      problem.SetParameterBlockConstant(&it->second[2]);
+      problem.SetParameterBlockConstant(&it->second[3]);
+      problem.SetParameterBlockConstant(&it->second[5]);
     }
   }
 
@@ -599,6 +546,7 @@ bool Solve() {
   ceres::Solver::Summary summary;
   ceres::Solve(options_, &problem, &summary);
   if (summary.IsSolutionUsable()) {
+    ROS_INFO("Usable solution found.");
     // Publish the new solution
     Publish();
     // Write the solution to a config file
@@ -608,21 +556,21 @@ bool Solve() {
       nav_msgs::Path msg;
       msg.header.stamp = ros::Time::now();
       msg.header.frame_id = "world";
-      std::map<ros::Time, Measurement>::iterator m;
-      for (m = measurements_.begin(); m != measurements_.end(); m++) {
+      std::map<ros::Time, double[6]>::iterator it;
+      for (it = wTb.begin(); it != wTb.end(); it++) {
         geometry_msgs::PoseStamped ps;
-        Eigen::Vector3d v(m->second.wTb[3], m->second.wTb[4], m->second.wTb[5]);
+        Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
         Eigen::AngleAxisd aa;
         if (v.norm() > 0) {
           aa.angle() = v.norm();
           aa.axis() = v.normalized();
         }
         Eigen::Quaterniond q(aa);
-        ps.header.stamp = m->first;
+        ps.header.stamp = it->first;
         ps.header.frame_id = "world";
-        ps.pose.position.x = m->second.wTb[0];
-        ps.pose.position.y = m->second.wTb[1];
-        ps.pose.position.z = m->second.wTb[2];
+        ps.pose.position.x = it->second[0];
+        ps.pose.position.y = it->second[1];
+        ps.pose.position.z = it->second[2];
         ps.pose.orientation.w = q.w();
         ps.pose.orientation.x = q.x();
         ps.pose.orientation.y = q.y();
@@ -634,7 +582,7 @@ bool Solve() {
     // Solution is usable
     return true;
   }
-
+  ROS_INFO("Solution is not usable.");
   // Solution is not usable
   return false;
 }
@@ -791,13 +739,11 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
       deleted++;
     }
   }
-  if (deleted)
-    ROS_INFO_STREAM("Deleted " << deleted << " data records");
-  // Check we have the mimumum amount of data
   if (data.pulses.size() < thresh_count_)
     return; 
   // Add the data
-  measurements_[msg->header.stamp].light = data;
+  ROS_INFO_THROTTLE(1, "Found a measurement");
+  measurements_[ros::Time::now()].light = data;
 }
 
 void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
@@ -809,7 +755,7 @@ void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
     if (it->header.frame_id == frame_parent_ &&
         it->child_frame_id == frame_child_) {
       ROS_INFO_THROTTLE(1, "Found a correction");
-      corrections_.push_back(*it);
+      corrections_[ros::Time::now()] = *it;
     }
   }
 }
@@ -883,6 +829,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get thresholds/correction parameter.");
 
   // What to refine
+  if (!nh.getParam("refine/trajectory", refine_trajectory_))
+    ROS_FATAL("Failed to get refine/trajectory parameter.");
   if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
     ROS_FATAL("Failed to get refine/extrinsics parameter.");
   if (!nh.getParam("refine/sensors", refine_sensors_))
@@ -917,14 +865,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get the solver/max_time parameter.");
   if (!nh.getParam("solver/max_iterations", options_.max_num_iterations))
     ROS_FATAL("Failed to get the solver/max_iterations parameter.");
-  if (!nh.getParam("solver/solver_threads", options_.num_linear_solver_threads))
-    ROS_FATAL("Failed to get the solver/solver_threads parameter.");
-  if (!nh.getParam("solver/jacobian_threads", options_.num_threads))
-    ROS_FATAL("Failed to get the solver/jacobian_threads parameter.");
-  if (!nh.getParam("solver/function_tolerance", options_.function_tolerance))
-    ROS_FATAL("Failed to get the solver/function_tolerance parameter.");
-  if (!nh.getParam("solver/gradient_tolerance", options_.gradient_tolerance))
-    ROS_FATAL("Failed to get the solver/gradient_tolerance parameter.");
+  if (!nh.getParam("solver/threads", options_.num_threads))
+    ROS_FATAL("Failed to get the solver/threads parameter.");
   if (!nh.getParam("solver/debug", options_.minimizer_progress_to_stdout))
     ROS_FATAL("Failed to get the solver/debug parameter.");
 
