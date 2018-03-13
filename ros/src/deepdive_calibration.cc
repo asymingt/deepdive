@@ -84,7 +84,11 @@ std::string frame_child_ = "body";
 // Whether to apply corrections
 bool correct_ = false;
 
+// Reesolution of the pose graph
+double resolution_ = 0.1;
+
 // What to solve for
+bool refine_lighthouses_ = true;
 bool refine_trajectory_ = false;
 bool refine_extrinsics_ = false;
 bool refine_sensors_ = false;
@@ -120,6 +124,7 @@ bool force2d_ = false;
 // Sensor visualization publisher
 ros::Publisher pub_sensors_;
 ros::Publisher pub_path_;
+ros::Publisher pub_corr_;
 
 // Timer for managing offline
 ros::Timer timer_;
@@ -355,12 +360,69 @@ struct LightCost {
       // The residual angle error for the specific axis
       residual[i] = angle[a] - T(light_.pulses[i].angle);
     }
+    // Weight
+    for (size_t i = 0; i < light_.pulses.size(); i++)
+      residual[i] *= T(weight_light_);
     // Everything went well
     return true;
   }
  // Internal variables
  private:
   deepdive_ros::Light light_;
+};
+
+// Residual error between sequential poses
+struct MotionCost {
+  explicit MotionCost() {}
+  // Called by ceres-solver to calculate error
+  template <typename T>
+  bool operator()(const T* const prev_pos_xy,  // PREV Body -> world (pos xy)
+                  const T* const prev_pos_z,   // PREV Body -> world (pos z)
+                  const T* const prev_rot_xy,  // PREV Body -> world (rot xy)
+                  const T* const prev_rot_z,   // PREV Body -> world (rot z)
+                  const T* const next_pos_xy,  // NEXT Body -> world (pos xy)
+                  const T* const next_pos_z,   // NEXT Body -> world (pos z)
+                  const T* const next_rot_xy,  // NEXT Body -> world (rot xy)
+                  const T* const next_rot_z,   // NEXT Body -> world (rot z)
+                  T* residual) const {
+    residual[0] =  prev_pos_xy[0] - next_pos_xy[0];
+    residual[1] =  prev_pos_xy[1] - next_pos_xy[1];
+    residual[2] =  prev_pos_z[0] - next_pos_z[0];
+    residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
+    residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
+    residual[5] =  prev_rot_z[0] - next_rot_z[0];
+    for (size_t i = 0; i < 6; i++)
+      residual[i] *= T(weight_motion_);
+    return true;
+  }
+};
+
+// Correct a state estimate with an EKF measurement
+struct CorrectionCost {
+  explicit CorrectionCost(double wTb[6]) {
+    for (size_t i = 0; i < 6; i++)
+      wTb_[i] = wTb[i];
+  }
+  // Called by ceres-solver to calculate error
+  template <typename T>
+  bool operator()(const T* const pos_xy,  // Body -> world (pos xy)
+                  const T* const pos_z,   // Body -> world (pos z)
+                  const T* const rot_xy,  // Body -> world (rot xy)
+                  const T* const rot_z,   // Body -> world (rot z)
+                  T* residual) const {
+    residual[0] =  pos_xy[0] - wTb_[0];
+    residual[1] =  pos_xy[1] - wTb_[1];
+    residual[2] =  pos_z[0] - wTb_[2];
+    residual[3] =  rot_xy[0] - wTb_[3];
+    residual[4] =  rot_xy[1] - wTb_[4];
+    residual[5] =  rot_z[0] - wTb_[5];
+    // Apply the weightind
+    for (size_t i = 0; i < 6; i++)
+      residual[i] *= T(weight_correction_);
+    return true;
+  }
+ private:
+  double wTb_[6];
 };
 
 bool Solve() {
@@ -417,12 +479,8 @@ bool Solve() {
 
   // Iterate over corrections
   std::map<ros::Time, geometry_msgs::TransformStamped>::iterator kt, kt_p;
+  kt_p = corrections_.end();
   for (kt = corrections_.begin(); kt != corrections_.end(); kt++) {
-    // Avoid super high freuqency samples
-    if (kt != corrections_.begin())
-      if ((kt->first - kt_p->first).toSec() < 0.1)
-        continue;
-    kt_p = kt;
     // Find the closest measurement to this correction and use it
     std::map<ros::Time, Measurement>::iterator mt, mt_p;
     mt = measurements_.lower_bound(kt->first);
@@ -435,6 +493,10 @@ bool Solve() {
     }
     if (fabs((kt->first - mt->first).toSec()) > thresh_correction_)
       continue;
+    // Avoid super high freuqency samples
+    if (kt != corrections_.begin())
+      if ((kt->first - kt_p->first).toSec() < resolution_)
+        continue;
     // Set the default value
     Eigen::Quaterniond q(
       kt->second.transform.rotation.w,
@@ -448,6 +510,9 @@ bool Solve() {
     wTb[kt->first][3] = aa.angle() * aa.axis()[0];
     wTb[kt->first][4] = aa.angle() * aa.axis()[1];
     wTb[kt->first][5] = aa.angle() * aa.axis()[2];
+    // Add the height data from the measurement
+    height += kt->second.transform.translation.z;
+    hcount += 1.0;
     // Get references to the lighthouse, tracker and axis
     Tracker & tracker = trackers_[mt->second.light.header.frame_id];
     Lighthouse & lighthouse = lighthouses_[mt->second.light.lighthouse];
@@ -470,9 +535,33 @@ bool Solve() {
       reinterpret_cast<double*>(tracker.tTh),
       reinterpret_cast<double*>(tracker.sensors),
       reinterpret_cast<double*>(lighthouse.params[axis]));
-    // Add the height data from the measurement
-    height += kt->second.transform.translation.z;
-    hcount += 1.0;
+    // If we are refining the trajectory we need to add a correction
+    if (refine_trajectory_) {
+      // Add the correction
+      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
+        CorrectionCost, 6, 2, 1, 2, 1>(new CorrectionCost(wTb[kt->first]));
+      problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+        reinterpret_cast<double*>(&wTb[kt->first][0]),    // pos: xy
+        reinterpret_cast<double*>(&wTb[kt->first][2]),    // pos: z
+        reinterpret_cast<double*>(&wTb[kt->first][3]),    // rot: xy
+        reinterpret_cast<double*>(&wTb[kt->first][5]));   // rot: z
+      // Add the motion cost
+      if (kt_p != corrections_.end()) {
+        ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+          <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
+        problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+        reinterpret_cast<double*>(&wTb[kt_p->first][0]),  // pos: xy
+        reinterpret_cast<double*>(&wTb[kt_p->first][2]),  // pos: z
+        reinterpret_cast<double*>(&wTb[kt_p->first][3]),  // rot: xy
+        reinterpret_cast<double*>(&wTb[kt_p->first][5]),  // rot: z
+        reinterpret_cast<double*>(&wTb[kt->first][0]),    // pos: xy
+        reinterpret_cast<double*>(&wTb[kt->first][2]),    // pos: z
+        reinterpret_cast<double*>(&wTb[kt->first][3]),    // rot: xy
+        reinterpret_cast<double*>(&wTb[kt->first][5]));   // rot: z
+      }
+    }
+    // Set the kt_p
+    kt_p = kt;
   }
 
   // Get the mean height
@@ -528,10 +617,13 @@ bool Solve() {
 
   // Make a subset of parameter blocks constant if we don't want to refine
   std::map<std::string, Lighthouse>::iterator it;
-  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) 
-    if (!refine_params_) 
+  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) {
+    if (!refine_lighthouses_)
+      problem.SetParameterBlockConstant(it->second.wTl);
+    if (!refine_params_)
       for (size_t i = 0; i < NUM_MOTORS; i++)
         problem.SetParameterBlockConstant(it->second.params[i]);
+  }
   std::map<std::string, Tracker>::iterator jt;
   for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
     if (!refine_extrinsics_)
@@ -546,38 +638,73 @@ bool Solve() {
   ceres::Solver::Summary summary;
   ceres::Solve(options_, &problem, &summary);
   if (summary.IsSolutionUsable()) {
+    // Print summary of important measurements
     ROS_INFO("Usable solution found.");
+    std::map<std::string, Lighthouse>::iterator it, jt;
+    for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
+      for (jt = std::next(it); jt != lighthouses_.end(); jt++)  {
+        double dl = 0;
+        for (size_t i = 0; i < 3; i++) {
+          dl += (it->second.wTl[i] - jt->second.wTl[i]) *
+                (it->second.wTl[i] - jt->second.wTl[i]);
+        }
+        ROS_INFO_STREAM("Distance between lighthouses " << it->first
+          << " and " << jt->first << " is " << sqrt(dl) << " meters");
+      }
+    }
     // Publish the new solution
     Publish();
     // Write the solution to a config file
     WriteConfig();
     // Print the trajectory of the body-frame in the world-frame
     if (visualize_) {
-      nav_msgs::Path msg;
-      msg.header.stamp = ros::Time::now();
-      msg.header.frame_id = "world";
-      std::map<ros::Time, double[6]>::iterator it;
-      for (it = wTb.begin(); it != wTb.end(); it++) {
-        geometry_msgs::PoseStamped ps;
-        Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
-        Eigen::AngleAxisd aa;
-        if (v.norm() > 0) {
-          aa.angle() = v.norm();
-          aa.axis() = v.normalized();
+      // Publish path
+      {
+        nav_msgs::Path msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = "world";
+        std::map<ros::Time, double[6]>::iterator it;
+        for (it = wTb.begin(); it != wTb.end(); it++) {
+          geometry_msgs::PoseStamped ps;
+          Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
+          Eigen::AngleAxisd aa;
+          if (v.norm() > 0) {
+            aa.angle() = v.norm();
+            aa.axis() = v.normalized();
+          }
+          Eigen::Quaterniond q(aa);
+          ps.header.stamp = it->first;
+          ps.header.frame_id = "world";
+          ps.pose.position.x = it->second[0];
+          ps.pose.position.y = it->second[1];
+          ps.pose.position.z = it->second[2];
+          ps.pose.orientation.w = q.w();
+          ps.pose.orientation.x = q.x();
+          ps.pose.orientation.y = q.y();
+          ps.pose.orientation.z = q.z();
+          msg.poses.push_back(ps);
         }
-        Eigen::Quaterniond q(aa);
-        ps.header.stamp = it->first;
-        ps.header.frame_id = "world";
-        ps.pose.position.x = it->second[0];
-        ps.pose.position.y = it->second[1];
-        ps.pose.position.z = it->second[2];
-        ps.pose.orientation.w = q.w();
-        ps.pose.orientation.x = q.x();
-        ps.pose.orientation.y = q.y();
-        ps.pose.orientation.z = q.z();
-        msg.poses.push_back(ps);
+        pub_path_.publish(msg);
       }
-      pub_path_.publish(msg);
+      // Publish corrections
+      {
+        nav_msgs::Path msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = "world";
+        std::map<ros::Time, double[6]>::iterator it;
+        for (it = wTb.begin(); it != wTb.end(); it++) {
+          geometry_msgs::TransformStamped & tfs = corrections_[it->first];
+          geometry_msgs::PoseStamped ps;
+          ps.header.stamp = it->first;
+          ps.header.frame_id = "world";
+          ps.pose.position.x = tfs.transform.translation.x;
+          ps.pose.position.y = tfs.transform.translation.y;
+          ps.pose.position.z = tfs.transform.translation.z;
+          ps.pose.orientation = tfs.transform.rotation;
+          msg.poses.push_back(ps);
+        }
+        pub_corr_.publish(msg);
+      }
     }
     // Solution is usable
     return true;
@@ -818,6 +945,10 @@ int main(int argc, char **argv) {
   if (!nh.getParam("frames/child", frame_child_))
     ROS_FATAL("Failed to get frames/child parameter.");  
 
+  // Get the pose graph resolution
+  if (!nh.getParam("resolution", resolution_))
+    ROS_FATAL("Failed to get resolution parameter.");
+
   // Get the thresholds
   if (!nh.getParam("thresholds/count", thresh_count_))
     ROS_FATAL("Failed to get threshods/count parameter.");
@@ -829,6 +960,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get thresholds/correction parameter.");
 
   // What to refine
+  if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
+    ROS_FATAL("Failed to get refine/lighthouses parameter.");
   if (!nh.getParam("refine/trajectory", refine_trajectory_))
     ROS_FATAL("Failed to get refine/trajectory parameter.");
   if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
@@ -930,6 +1063,8 @@ int main(int argc, char **argv) {
     nh.advertise<visualization_msgs::MarkerArray>("/sensors", 10, true);
   pub_path_ =
     nh.advertise<nav_msgs::Path>("/path", 10, true);
+  pub_corr_ =
+    nh.advertise<nav_msgs::Path>("/corr", 10, true);
 
   // Setup a timer to automatically trigger solution on end of experiment
   timer_ = nh.createTimer(ros::Duration(1.0), TimerCallback, true, false);

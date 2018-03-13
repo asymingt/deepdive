@@ -5,7 +5,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /TF1
         - /TF1/Frames1
       Splitter Ratio: 0.5
     Tree Height: 895
@@ -79,8 +78,24 @@ Visualization Manager:
           Value: true
         body:
           Value: true
+        localization:
+          Value: true
         rviz:
           Value: false
+        top_aft:
+          Value: true
+        top_aft_arm_distal_link:
+          Value: true
+        top_aft_arm_proximal_link:
+          Value: true
+        top_aft_gripper_left_distal_link:
+          Value: true
+        top_aft_gripper_left_proximal_link:
+          Value: true
+        top_aft_gripper_right_distal_link:
+          Value: true
+        top_aft_gripper_right_proximal_link:
+          Value: true
         world:
           Value: true
       Marker Scale: 0.200000003
@@ -103,6 +118,8 @@ Visualization Manager:
               LHR-08DE340B/light:
                 LHR-08DE340B/imu:
                   {}
+          localization:
+            {}
           rviz:
             {}
       Update Interval: 0
@@ -110,9 +127,9 @@ Visualization Manager:
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /sensors
-      Name: MarkerArray
+      Name: Sensors
       Namespaces:
-        sensors: true
+        {}
       Queue Size: 100
       Value: true
     - Alpha: 1
@@ -125,7 +142,7 @@ Visualization Manager:
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: Ground truth
       Offset:
         X: 0
         Y: 0
@@ -136,6 +153,29 @@ Visualization Manager:
       Shaft Diameter: 0.100000001
       Shaft Length: 0.100000001
       Topic: /path
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 255; 0; 0
+      Enabled: true
+      Head Diameter: 0.300000012
+      Head Length: 0.200000003
+      Length: 0.300000012
+      Line Style: Lines
+      Line Width: 0.0299999993
+      Name: Estimate
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.0299999993
+      Shaft Diameter: 0.100000001
+      Shaft Length: 0.100000001
+      Topic: /corr
       Unreliable: false
       Value: true
   Enabled: true
@@ -162,26 +202,21 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/Orbit
-      Distance: 8.26291561
+      Angle: 0
+      Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
-      Focal Point:
-        X: 0
-        Y: 0
-        Z: 0
-      Focal Shape Fixed Size: false
-      Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.995398164
+      Scale: 375.817291
       Target Frame: <Fixed Frame>
-      Value: Orbit (rviz)
-      Yaw: 5.1585803
+      Value: TopDownOrtho (rviz)
+      X: -0.00352230039
+      Y: -0.108684197
     Saved: ~
 Window Geometry:
   Displays:
