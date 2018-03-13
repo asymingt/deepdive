@@ -104,6 +104,7 @@ ros::Publisher pub_pose_;                           // Pose publisher
 ros::Publisher pub_twist_;                          // Twist publisher
 double thresh_angle_;                               // Threshold on angle
 double thresh_duration_;                            // Threshold on duration
+tf2_ros::Buffer buffer_;                            // Transform buffer
 
 namespace UKF {
 
@@ -208,80 +209,30 @@ void TimerCallback(ros::TimerEvent const& info) {
   if (!initialized_) return;
 
   // Check that we are being called fast enough
-  static double dt;
+  double dt;
   if (!Delta(ros::Time::now(), dt))
     return;
 
   // Propagate the filter forward
   filter_.a_priori_step(dt);
 
-  // The filter expresses all quantitued as relationships between IMU and the world
-  // frames. We now need to transform these quantities to the mechanical frame,
-  // which should match the diagram in the Developer Guidelines 1.3 PDF page 5.
-  // https://dl.vive.com/Tracker/Guideline/HTC_Vive_Tracker_Developer_Guidelines_v1.3.pdf
-  Eigen::Affine3d wTi = Eigen::Affine3d::Identity();
-  wTi.translation() = filter_.state.get_field<Position>();
-  wTi.linear() = filter_.state.get_field<Attitude>().toRotationMatrix();
-  Eigen::Affine3d iTh = iTt_ * tTh_;
-  Eigen::Affine3d wTh = wTi * iTh;
-  UKF::Vector<3> linvel =
-    iTh.linear().inverse() * filter_.state.get_field<Velocity>();
-  UKF::Vector<3> angvel =
-    iTh.linear().inverse() * filter_.state.get_field<AngularVelocity>();
-
-  // Transform the covariances to reflect the coordinate frame change. See:
-  // https://robotics.stackexchange.com/questions/2556/how-to-rotate-covariance
-  Eigen::Matrix<double, 6, 6> P = filter_.covariance.block<6, 6>(0, 0);
-  Eigen::Matrix<double, 6, 6> R = Eigen::Matrix<double, 6, 6>::Identity();
-  R.block<3,3>(0, 0) = iTh.linear().inverse();
-  R.block<3,3>(3, 3) = iTh.linear().inverse();
-  P = R * P * R.transpose();
-
-  // The filter relates WORLD and IMU frames
-  static std_msgs::Header header;
-  header.stamp = ros::Time::now();
-  header.frame_id = frame_parent_;
-
   // Broadcast the tracker pose on TF2
   static tf2_ros::TransformBroadcaster br;
-  static geometry_msgs::TransformStamped tf;
-  tf.header = header;
-  tf.child_frame_id = frame_child_;
-  tf.transform.translation.x = wTh.translation()[0];
-  tf.transform.translation.y = wTh.translation()[1];
-  tf.transform.translation.z = wTh.translation()[2];
-  Eigen::Quaterniond q(wTh.linear());
-  tf.transform.rotation.w = q.w();
-  tf.transform.rotation.x = q.x();
-  tf.transform.rotation.y = q.y();
-  tf.transform.rotation.z = q.z();
+  geometry_msgs::TransformStamped tf;
+  tf.header.stamp = ros::Time::now();
+  tf.header.frame_id = frame_parent_;
+  tf.child_frame_id = serial_ + "/imu";
+  tf.transform.translation.x = filter_.state.get_field<Position>()[0];
+  tf.transform.translation.y = filter_.state.get_field<Position>()[1];
+  tf.transform.translation.z = filter_.state.get_field<Position>()[2];
+  tf.transform.rotation.w = filter_.state.get_field<Attitude>().w();
+  tf.transform.rotation.x = filter_.state.get_field<Attitude>().x();
+  tf.transform.rotation.y = filter_.state.get_field<Attitude>().y();
+  tf.transform.rotation.z = filter_.state.get_field<Attitude>().z();
   br.sendTransform(tf);
 
-  // Broadcast the pose with covariance
-  static geometry_msgs::PoseWithCovarianceStamped pwcs;
-  pwcs.header = header;
-  pwcs.pose.pose.position.x = tf.transform.translation.x;
-  pwcs.pose.pose.position.y = tf.transform.translation.y;
-  pwcs.pose.pose.position.z = tf.transform.translation.z;
-  pwcs.pose.pose.orientation = tf.transform.rotation;
-  for (size_t i = 0; i < 6; i++)
-    for (size_t j = 0; j < 6; j++)
-      pwcs.pose.covariance[i*6 + j] = P(i, j);
-  pub_pose_.publish(pwcs);
-
-  // Broadcast the twist with covariance
-  static geometry_msgs::TwistWithCovarianceStamped twcs;
-  twcs.header = header;
-  twcs.twist.twist.linear.x = linvel[0];
-  twcs.twist.twist.linear.y = linvel[1];
-  twcs.twist.twist.linear.z = linvel[2];
-  twcs.twist.twist.angular.x = angvel[0];
-  twcs.twist.twist.angular.y = angvel[1];
-  twcs.twist.twist.angular.z = angvel[2];
-  for (size_t i = 0; i < 6; i++)
-    for (size_t j = 0; j < 6; j++)
-      twcs.twist.covariance[i*6 + j] = P(i, j);
-  pub_twist_.publish(twcs);
+  // Print the covariance matrix
+  // ROS_INFO_STREAM_THROTTLE(1.0, filter_.covariance);
 }
 
 // This will be called at approximately 120Hz
@@ -291,7 +242,7 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   if (!ready_ || msg->header.frame_id != serial_) return;
 
   // Check that we are being called fast enough
-  static double dt;
+  double dt;
   if (!Delta(ros::Time::now(), dt))
     return;
 
@@ -300,11 +251,9 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
     return;
 
   // Check that the solver has produced a lighthouse transform
-  static tf2_ros::Buffer buffer;
-  static tf2_ros::TransformListener listener(buffer);
   try {
-    geometry_msgs::TransformStamped tf;
-    tf = buffer.lookupTransform(frame_parent_, msg->lighthouse, ros::Time(0));
+    geometry_msgs::TransformStamped tf =
+      buffer_.lookupTransform(frame_parent_, msg->lighthouse, ros::Time(0));
     Eigen::Affine3d & T = wTl_[msg->lighthouse];
     T.translation() = Eigen::Vector3d(
       tf.transform.translation.x,
@@ -352,7 +301,7 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   if (!ready_ || msg->header.frame_id != serial_) return;
 
   // Check that we are being called fast enough
-  static double dt;
+  double dt;
   if (!Delta(ros::Time::now(), dt))
     return;
 
@@ -420,36 +369,7 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
       // Get the two derived transforms that we care about
       tTh_ = hTt.inverse();
       iTt_ = iTt;
-      // Broadcast static transforms for tracker -> head / imu
-      static tf2_ros::StaticTransformBroadcaster broadcaster;
-      static Eigen::Quaterniond q;
-      static geometry_msgs::TransformStamped tfs;
-      tfs.header.stamp = ros::Time::now();
-      tfs.header.frame_id = frame_child_;
-      tfs.child_frame_id = frame_child_ + "/light";
-      tfs.transform.translation.x = tTh_.translation()[0];
-      tfs.transform.translation.y = tTh_.translation()[1];
-      tfs.transform.translation.z = tTh_.translation()[2];
-      q = tTh_.linear();
-      tfs.transform.rotation.w = q.w();
-      tfs.transform.rotation.x = q.x();
-      tfs.transform.rotation.y = q.y();
-      tfs.transform.rotation.z = q.z();
-      broadcaster.sendTransform(tfs);
-      // Send the light -> IMU transform
-      tfs.header.stamp = ros::Time::now();
-      tfs.header.frame_id = frame_child_ + "/light";
-      tfs.child_frame_id = frame_child_ + "/imu";
-      tfs.transform.translation.x = iTt_.translation()[0];
-      tfs.transform.translation.y = iTt_.translation()[1];
-      tfs.transform.translation.z = iTt_.translation()[2];
-      q = iTt_.linear();
-      tfs.transform.rotation.w = q.w();
-      tfs.transform.rotation.x = q.x();
-      tfs.transform.rotation.y = q.y();
-      tfs.transform.rotation.z = q.z();
-      broadcaster.sendTransform(tfs);
-      // ROS_INFO_STREAM("Tracker " << serial_ << " initialized");
+      // We are now ready
       ready_ = true;
     }
   }
@@ -494,6 +414,9 @@ int main(int argc, char **argv) {
   ros::init(argc, argv, "deepdive_tracker");
   ros::NodeHandle nh("~");
 
+  // Start listening for transforms now that we hav initialized ROS
+  tf2_ros::TransformListener listener(buffer_);
+
   // Get some global information
   if (!nh.getParam("serial", serial_))
     ROS_FATAL("Failed to get serial parameter.");
@@ -504,16 +427,14 @@ int main(int argc, char **argv) {
   if (!nh.getParam("frames/parent", frame_parent_))
     ROS_FATAL("Failed to get frames/parent parameter.");
   if (!nh.getParam("frames/child", frame_child_))
-    ROS_FATAL("Failed to get frames/child parameter.");  
+    ROS_FATAL("Failed to get frames/child parameter.");
 
   // Get the topics for data topics
   std::string topic_pose, topic_twist, topic_sensors;
   if (!nh.getParam("topics/pose", topic_pose))
     ROS_FATAL("Failed to get topics/pose parameter.");
   if (!nh.getParam("topics/twist", topic_twist))
-    ROS_FATAL("Failed to get topics/twist parameter.");  
-  if (!nh.getParam("topics/sensors", topic_sensors))
-    ROS_FATAL("Failed to get topics/sensora parameter.");  
+    ROS_FATAL("Failed to get topics/twist parameter.");
 
   // Get the thresholds
   if (!nh.getParam("thresholds/angle", thresh_angle_))

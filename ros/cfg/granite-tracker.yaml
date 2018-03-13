@@ -1,17 +1,32 @@
-# Tracker serial number (this will be the parent frame)
-serial:           "LHR-08DDBC05"
+# TRACKING PARAMETERS
+#
+# The tracking code is soleley responsible for estimating the transform
+# between the world and body frame. To do this it requires a number of
+# static transforms -- notably the world -> lighthouse transform and the
+# tracker -> body transforms that are broadcast by the calibtation code.
+
+# Covariance matrix is written to this file and reloaded in future
+# to improve filter convergence time.
+cfgfile: "tracking.cov"
+
+# The trackers rigidly attached to the body being tracked. This code
+# expects <serial>/imu, <serial>/light and <serial>/body frames to
+# be broadcast by the calibration node for each of these trackers.
+trackers:
+  - "LHR-08DDBC05"
+  - "LHR-08DE340B"
 
 # This filter relates these two frames
 frames:
   parent:         "world"               # Inertial parent frame (TF2)
-  child:          "stbd"                # Child frame (TF2)
+  child:          "body"                # Child frame (TF2)
 
 # Topics for publishing data
 topics:
-  pose:           "/loc/stbd/pose"      # Topic for publishing pose
-  twist:          "/loc/stbd/twist"     # Topic for publishing twist
+  pose:           "/loc/truth/pose"     # Topic for publishing pose
+  twist:          "/loc/truth/twist"    # Topic for publishing twist
 
-# Gravity vector in fixed parent (inertial) frame
+# Gravity vector in parent frame
 gravity:          [0.0, 0.0, -9.80665]
 
 # Fixed tracking rate of filter
@@ -19,8 +34,8 @@ rate:             62.5
 
 # Run-to-run bias correcting using parameters from vive
 correct:
-  light:          false                 # Correct light measurements
-  imu:            false                 # Correct IMU measurements
+  light:          true                 # Correct light measurements
+  imu:            true                 # Correct IMU measurements
 
 # What meaasurements to use to correct the state estimate
 use:

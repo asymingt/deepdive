@@ -59,9 +59,6 @@ target_compile_definitions(deepdive_tracker
 cs_add_executable(deepdive_calibration src/deepdive_calibration.cc)
 target_link_libraries(deepdive_calibration ${CERES_LIBRARIES})
 
-# Fusion merges multiple tracker solutions to track a rigid body
-cs_add_executable(deepdive_fusion src/deepdive_fusion.cc)
-
 # Install products
 cs_install()
 

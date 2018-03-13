@@ -5,7 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /Global Options1
-        - /TF1/Frames1
+        - /Transforms1/Frames1
       Splitter Ratio: 0.5
     Tree Height: 895
   - Class: rviz/Selection
@@ -78,28 +78,12 @@ Visualization Manager:
           Value: true
         body:
           Value: true
-        localization:
-          Value: true
         rviz:
           Value: false
-        top_aft:
-          Value: true
-        top_aft_arm_distal_link:
-          Value: true
-        top_aft_arm_proximal_link:
-          Value: true
-        top_aft_gripper_left_distal_link:
-          Value: true
-        top_aft_gripper_left_proximal_link:
-          Value: true
-        top_aft_gripper_right_distal_link:
-          Value: true
-        top_aft_gripper_right_proximal_link:
-          Value: true
         world:
           Value: true
       Marker Scale: 0.200000003
-      Name: TF
+      Name: Transforms
       Show Arrows: true
       Show Axes: true
       Show Names: true
@@ -108,17 +92,6 @@ Visualization Manager:
           2935772913:
             {}
           668207140:
-            {}
-          body:
-            LHR-08DDBC05:
-              LHR-08DDBC05/light:
-                LHR-08DDBC05/imu:
-                  {}
-            LHR-08DE340B:
-              LHR-08DE340B/light:
-                LHR-08DE340B/imu:
-                  {}
-          localization:
             {}
           rviz:
             {}
