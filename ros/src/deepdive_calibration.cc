@@ -166,6 +166,16 @@ int ReadConfig() {
       count++;
       continue;
     }
+    if (trackers_.find(c) != trackers_.end()) {
+      trackers_[c].bTh[0] = x;
+      trackers_[c].bTh[1] = y;
+      trackers_[c].bTh[2] = z;
+      trackers_[c].bTh[3] = aa.angle() * aa.axis()[0];
+      trackers_[c].bTh[4] = aa.angle() * aa.axis()[1];
+      trackers_[c].bTh[5] = aa.angle() * aa.axis()[2];
+      count++;
+      continue;
+    }
     ROS_WARN_STREAM("Transform " << p << " -> " << c << " invalid");
   }
   return count;
@@ -1073,8 +1083,8 @@ int main(int argc, char **argv) {
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
   int n = ReadConfig();
-  if (n == lighthouses_.size()) {
-    ROS_INFO_STREAM("Read " << n << " lighthouse transforms from calibration");
+  if (n == lighthouses_.size() + trackers_.size()) {
+    ROS_INFO_STREAM("Read " << n << " transforms from calibration");
   } else {
     ROS_INFO_STREAM("Could not read calibration file");
   }
