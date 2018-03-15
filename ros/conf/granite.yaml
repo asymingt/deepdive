@@ -28,7 +28,7 @@ thresholds:
   count:            4          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
   duration:         1.0        # Threshod on duration (in microsecs)
-  correction:       0.01       # 100ms threshold on mapped time
+  correction:       0.01       # 10ms threshold on mapped time
 
 # Publish rviz markers for the sensors
 visualize:          true
@@ -59,7 +59,7 @@ tracker_stbd:
 cfgfile:            "granite.tf2"
 
 # Maximum resolution (time difference) between poses in the graph
-resolution:         0.01
+resolution:         0.001
 
 # Apply light corrections broadcast over OOTX
 correct:            true
@@ -70,8 +70,8 @@ force2d:            true
 # What else to refine, besides the lighthouse ans sensor positions
 refine:
   lighthouses:      true       # Refine lighthouse positions
-  extrinsics:       false      # If false tracker frame is the body frame
   trajectory:       false      # If false we will use the corrections
+  extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
   head:             false      # Refine head transform
@@ -80,7 +80,7 @@ refine:
 weight:
   light:            1.0
   correction:       1.0
-  motion:           1.0
+  motion:           10.0
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:

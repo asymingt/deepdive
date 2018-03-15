@@ -11,10 +11,11 @@
   <arg name="f_data" default="$(find deepdive_ros)/data/$(arg profile).bag"/>
   <arg name="f_cal" default="$(find deepdive_ros)/cal/$(arg profile).tf2"/>
   <!-- Bridge or replay, depending on the offline argument -->
+  <param if="$(arg offline)" name="/use_sim_time" type="bool" value="true"/>
   <node if="$(arg offline)"
         pkg="rosbag" type="play"
         name="deepdive_player" output="log"
-        args="--clock -d 1 -r $(arg speed) $(arg f_data)"/>
+        args="--clock -k -d 1 -r $(arg speed) $(arg f_data)"/>
   <node unless="$(arg offline)"
         pkg="deepdive_ros" type="deepdive_bridge"
         name="$(arg profile)_bridge" output="$(arg output)"/>
