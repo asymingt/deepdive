@@ -34,47 +34,22 @@
 #include <fstream>
 #include <sstream>
 
+// Shared local code
+#include "deepdive.hh"
+
 // GLOBAL PARAMETERS
 
-// Calibration parameters
+// List of lighthouses
+static LighthouseMap lighthouses_;
 
-static constexpr size_t NUM_MOTORS = 2;
-static constexpr size_t NUM_SENSORS = 32;
-static constexpr size_t NUM_PARAMS = 5;
-enum {
-  CAL_PHASE = 0,
-  CAL_TILT,
-  CAL_GIB_PHASE,
-  CAL_GIB_MAG,
-  CAL_CURVE
-};
+// List of trackers
+static TrackerMap trackers_;
 
-// Lighthouse data structure
-struct Lighthouse {
-  double wTl[6];
-  double params[NUM_MOTORS][NUM_PARAMS];
-  bool ready;
-};
-std::map<std::string, Lighthouse> lighthouses_;
-
-// Tracker data structure
-struct Tracker {
-  double bTh[6];
-  double tTh[6];
-  double sensors[NUM_SENSORS*6];
-  bool ready;
-};
-std::map<std::string, Tracker> trackers_;
-
-// Pulse measurements
-struct Measurement {
-  double wTb[6];
-  deepdive_ros::Light light;
-};
-std::map<ros::Time, Measurement> measurements_;
+// List of measurements
+static MeasurementMap measurements_;
 
 // Corrections
-std::map<ros::Time, geometry_msgs::TransformStamped> corrections_;
+static CorrectionMap corrections_;
 
 // Global strings
 std::string calfile_ = "deepdive.tf2";
@@ -136,107 +111,12 @@ void SendStaticTransform(geometry_msgs::TransformStamped const& tfs) {
   bc.sendTransform(tfs);
 }
 
-// CONFIGURATION PERSISTENCE
-
-int ReadConfig() {
-  // Entries take the form x y z qx qy qz qw parent child
-  std::ifstream infile(calfile_);
-  if (!infile.is_open()) {
-    ROS_WARN("Could not open config file for reading");
-    return 0;
-  }
-  std::string line;
-  int count = 0;
-  while (std::getline(infile, line)) {
-    std::istringstream iss(line);
-    double x, y, z, qx, qy, qz, qw;
-    std::string p, c;
-    if (!(iss >> x >> y >> z >> qx >> qy >> qz >> qw >> p >> c)) {
-      ROS_ERROR("Badly formatted config file");
-      return 0;
-    }
-    Eigen::AngleAxisd aa(Eigen::Quaterniond(qw, qx, qy, qz));
-    if (lighthouses_.find(c) != lighthouses_.end()) {
-      lighthouses_[c].wTl[0] = x;
-      lighthouses_[c].wTl[1] = y;
-      lighthouses_[c].wTl[2] = z;
-      lighthouses_[c].wTl[3] = aa.angle() * aa.axis()[0];
-      lighthouses_[c].wTl[4] = aa.angle() * aa.axis()[1];
-      lighthouses_[c].wTl[5] = aa.angle() * aa.axis()[2];
-      count++;
-      continue;
-    }
-    if (trackers_.find(c) != trackers_.end()) {
-      trackers_[c].bTh[0] = x;
-      trackers_[c].bTh[1] = y;
-      trackers_[c].bTh[2] = z;
-      trackers_[c].bTh[3] = aa.angle() * aa.axis()[0];
-      trackers_[c].bTh[4] = aa.angle() * aa.axis()[1];
-      trackers_[c].bTh[5] = aa.angle() * aa.axis()[2];
-      count++;
-      continue;
-    }
-    ROS_WARN_STREAM("Transform " << p << " -> " << c << " invalid");
-  }
-  return count;
-}
-
-int WriteConfig() {
-  std::ofstream outfile(calfile_);
-  if (!outfile.is_open()) {
-    ROS_WARN("Could not open config file for writing");
-    return 0;
-  }
-  int count = 0;
-  std::map<std::string, Lighthouse>::iterator it;
-  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
-    Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
-    Eigen::AngleAxisd aa;
-    if (v.norm() > 0) {
-      aa.angle() = v.norm();
-      aa.axis() = v.normalized();
-    }
-    Eigen::Quaterniond q(aa);
-    outfile << it->second.wTl[0] << " "
-            << it->second.wTl[1] << " "
-            << it->second.wTl[2] << " "
-            << q.x() << " "
-            << q.y() << " "
-            << q.z() << " "
-            << q.w() << " "
-            << frame_parent_ << " " << it->first
-            << std::endl;
-    count++;
-  }
-  std::map<std::string, Tracker>::iterator jt;
-  for (jt = trackers_.begin(); jt !=trackers_.end(); jt++)  {
-    Eigen::Vector3d v(jt->second.bTh[3], jt->second.bTh[4], jt->second.bTh[5]);
-    Eigen::AngleAxisd aa;
-    if (v.norm() > 0) {
-      aa.angle() = v.norm();
-      aa.axis() = v.normalized();
-    }
-    Eigen::Quaterniond q(aa);
-    outfile << jt->second.bTh[0] << " "
-            << jt->second.bTh[1] << " "
-            << jt->second.bTh[2] << " "
-            << q.x() << " "
-            << q.y() << " "
-            << q.z() << " "
-            << q.w() << " "
-            << frame_child_ << " " << jt->first
-            << std::endl;
-    count++;
-  }
-  return count;
-}
-
 // SOLUTION PUBLISHING
 
 void Publish() {
   geometry_msgs::TransformStamped tfs;
   // Publish lighthouse positions
-  std::map<std::string, Lighthouse>::iterator it;
+  LighthouseMap::iterator it;
   for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
     Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
     Eigen::AngleAxisd aa;
@@ -258,7 +138,7 @@ void Publish() {
     SendStaticTransform(tfs);
   }
   // Publish tracker extrinsics
-  std::map<std::string, Tracker>::iterator jt;
+  TrackerMap::iterator jt;
   for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
     Eigen::Vector3d v(jt->second.bTh[3], jt->second.bTh[4], jt->second.bTh[5]);
     Eigen::AngleAxisd aa;
@@ -488,11 +368,11 @@ bool Solve() {
   std::map<ros::Time, double[6]> wTb;
 
   // Iterate over corrections
-  std::map<ros::Time, geometry_msgs::TransformStamped>::iterator kt, kt_p;
+  CorrectionMap::iterator kt, kt_p;
   kt_p = corrections_.end();
   for (kt = corrections_.begin(); kt != corrections_.end(); kt++) {
     // Find the closest measurement to this correction and use it
-    std::map<ros::Time, Measurement>::iterator mt, mt_p;
+    MeasurementMap::iterator mt, mt_p;
     mt = measurements_.lower_bound(kt->first);
     if (mt == measurements_.end())
       continue;
@@ -586,11 +466,11 @@ bool Solve() {
     return false;
   } else {
     ROS_INFO_STREAM("We received this much data from each lighthouse:");
-    std::map<std::string, Lighthouse>::iterator it;
+    LighthouseMap::iterator it;
     for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) 
       ROS_INFO_STREAM("- ID " << it->first << ": " << l_tally[it->first]);
     ROS_INFO_STREAM("We received this much data from each tracker:");
-    std::map<std::string, Tracker>::iterator jt;
+    TrackerMap::iterator jt;
     for (jt = trackers_.begin(); jt != trackers_.end(); jt++) 
       ROS_INFO_STREAM("- ID " << jt->first << ": " << t_tally[jt->first]);
   }
@@ -626,7 +506,7 @@ bool Solve() {
   }
 
   // Make a subset of parameter blocks constant if we don't want to refine
-  std::map<std::string, Lighthouse>::iterator it;
+  LighthouseMap::iterator it;
   for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) {
     if (!refine_lighthouses_)
       problem.SetParameterBlockConstant(it->second.wTl);
@@ -634,7 +514,7 @@ bool Solve() {
       for (size_t i = 0; i < NUM_MOTORS; i++)
         problem.SetParameterBlockConstant(it->second.params[i]);
   }
-  std::map<std::string, Tracker>::iterator jt;
+  TrackerMap::iterator jt;
   for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
     if (!refine_extrinsics_)
       problem.SetParameterBlockConstant(jt->second.bTh);
@@ -650,7 +530,7 @@ bool Solve() {
   if (summary.IsSolutionUsable()) {
     // Print summary of important measurements
     ROS_INFO("Usable solution found.");
-    std::map<std::string, Lighthouse>::iterator it, jt;
+    LighthouseMap::iterator it, jt;
     for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
       for (jt = std::next(it); jt != lighthouses_.end(); jt++)  {
         double dl = 0;
@@ -665,7 +545,11 @@ bool Solve() {
     // Publish the new solution
     Publish();
     // Write the solution to a config file
-    WriteConfig();
+    if (WriteConfig(calfile_, frame_parent_, frame_child_,
+      lighthouses_, trackers_))
+      ROS_INFO_STREAM("Calibration written to " << calfile_);
+    else
+      ROS_INFO_STREAM("Could not write calibration to" << calfile_);
     // Print the trajectory of the body-frame in the world-frame
     if (visualize_) {
       // Publish path
@@ -807,7 +691,7 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
   // frame transforms rtelating the head, light and body frames
   if (visualize_) {
     visualization_msgs::MarkerArray msg;
-    std::map<std::string, Tracker>::iterator jt;
+    TrackerMap::iterator jt;
     size_t n = 0;
     for (jt = trackers_.begin(); jt != trackers_.end(); jt++, n++)  {
       for (uint16_t i = 0; i < NUM_SENSORS; i++) {
@@ -1082,11 +966,10 @@ int main(int argc, char **argv) {
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
-  int n = ReadConfig();
-  if (n == lighthouses_.size() + trackers_.size()) {
-    ROS_INFO_STREAM("Read " << n << " transforms from calibration");
+  if (ReadConfig(calfile_, lighthouses_, trackers_)) {
+    ROS_INFO("Read transforms from calibration");
   } else {
-    ROS_INFO_STREAM("Could not read calibration file");
+    ROS_INFO("Could not read calibration file");
   }
   Publish();
 

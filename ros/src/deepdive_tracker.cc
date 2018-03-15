@@ -46,7 +46,11 @@ struct Context {
   Eigen::Vector3d gravity;      // Gravity in the world frame
   deepdive_ros::Motor params;   // Lighthouse parameters
   uint8_t axis;                 // Tracking axis - horizontal (0), vertical (1)
-  bool correct;                 // SHould we correct angles using parameters
+  bool correct;                 // Should we correct angles using parameters
+  double thresh_angle_;         // Threshold on angle acceptance (in degrees)
+  double thresh_duration_;      // Threshold on duration acceptance (in us)
+  std::string frame_parent;     // Parent frame "world"
+  std::string frame_child;      // Child frame "body"
 };
 
 // TRACKING FILTER
@@ -186,22 +190,6 @@ namespace UKF {
 
 // GLOBAL DATA STRUCTURES
 
-// Lighthouse data structure
-struct Lighthouse {
-  deepdive_ros::Motor params[NUM_MOTORS];   // Parameters
-  bool ready;                               // Data received
-};
-typedef std::map<std::string, Lighthouse> LighthouseMap;
-
-// Tracker data structure
-struct Tracker {
-  ParameterFilter error;                    // IMU error filter
-  Eigen::Vector3d sensors[NUM_SENSORS];     // Sensor position frame
-  bool ready;                               // Data received
-};
-typedef std::map<std::string, Tracker> TrackerMap;
-
-static tf2_ros::Buffer buffer_;             // Transform buffer
 static LighthouseMap lighthouses_;          // List of lighthouses
 static TrackerMap trackers_;                // List of trackers
 static Context context_;                    // Measurement context
@@ -214,7 +202,7 @@ double Delta(ros::Time const& now) {
   double dt = (now - last).toSec();
   last = now;
   if (dt > rate_ * 2)
-    ROS_WARN_STREAM_THROTTLE(1, "Delta call greater than 2x target period");
+    ROS_WARN_STREAM_THROTTLE(1, "Made dt call at > 2x target period");
   return (dt > 0 ? dt : rate_);
 }
 
@@ -262,11 +250,11 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   std::vector<deepdive_ros::Pulse> data;
   for (size_t i = 0; i < msg->pulses.size(); i++) {
     // Basic sanity checks on the data
-    if (fabs(msg->pulses[i].angle) > thresh_angle_ * M_PI / 180.0) {
+    if (fabs(msg->pulses[i].angle) > context.thresh_angle * M_PI / 180.0) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on angle");
       return;
     }
-    if (fabs(msg->pulses[i].duration) < thresh_duration_ * 1e-6) {
+    if (fabs(msg->pulses[i].duration) < context.thresh_duration * 1e-6) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on duration");
       return;
     }
@@ -376,16 +364,59 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   filter_.a_posteriori_step();
 }
 
+void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
+  // Check that we are recording and that the tracker/lighthouse is ready
+  if (!recording_)
+    return;
+  std::vector<geometry_msgs::TransformStamped>::const_iterator it;
+  for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
+    if (it->header.frame_id == frame_parent_ &&
+        it->child_frame_id == frame_child_) {
+      ROS_INFO_THROTTLE(1, "Found a correction");
+      corrections_[ros::Time::now()] = *it;
+    }
+  }
+}
+
+bool TriggerCallback(std_srvs::Trigger::Request  &req,
+                     std_srvs::Trigger::Response &res)
+{
+  if (!recording_) {
+    res.success = true;
+    res.message = "Recording started.";
+  }
+  if (recording_) {
+    // Solve the problem
+    res.success = Solve();
+    if (res.success)
+      res.message = "Recording stopped. Solution found.";
+    else
+      res.message = "Recording stopped. Solution not found.";
+    // Clear all the data and corrections
+    measurements_.clear();
+    corrections_.clear();
+  }
+  // Toggle recording state
+  recording_ = !recording_;
+  // Success
+  return true;
+}
+
 // Main entry point of application
 int main(int argc, char **argv) {
   // Initialize ROS and create node handle
   ros::init(argc, argv, "deepdive_tracker");
   ros::NodeHandle nh("~");
 
-  // Start listening for transforms now that we hav initialized ROS
-  tf2_ros::TransformListener listener(buffer_);
+  // Get the lighthouse information
+  std::vector<std::string> lighthouses;
+  if (!nh.getParam("lighthouses", lighthouses))
+    ROS_FATAL("Failed to get the lighthouse list.");
+  std::vector<std::string>::iterator it;
+  for (it = lighthouses.begin(); it != lighthouses.end(); it++)
+    lighthouses_[*it].ready = false;
 
-  // Get the parent information
+  // Get the tracker information
   std::vector<std::string> trackers;
   if (!nh.getParam("trackers", trackers))
     ROS_FATAL("Failed to get the tracker list.");
@@ -398,41 +429,31 @@ int main(int argc, char **argv) {
   }
 
   // Get the frame names for Tf2
-  if (!nh.getParam("frames/parent", frame_parent_))
+  if (!nh.getParam("frames/parent", context_.frame_parent))
     ROS_FATAL("Failed to get frames/parent parameter.");
-  if (!nh.getParam("frames/child", frame_child_))
+  if (!nh.getParam("frames/child", context_.frame_child))
     ROS_FATAL("Failed to get frames/child parameter.");
 
   // Get the topics for data topics
-  std::string topic_pose, topic_twist, topic_sensors;
+  std::string topic_pose, topic_twist;
   if (!nh.getParam("topics/pose", topic_pose))
     ROS_FATAL("Failed to get topics/pose parameter.");
   if (!nh.getParam("topics/twist", topic_twist))
     ROS_FATAL("Failed to get topics/twist parameter.");
 
   // Get the thresholds
-  if (!nh.getParam("thresholds/angle", thresh_angle_))
+  if (!nh.getParam("thresholds/angle", context_.thresh_angle_))
     ROS_FATAL("Failed to get thresholds/angle parameter.");
-  if (!nh.getParam("thresholds/duration", thresh_duration_))
+  if (!nh.getParam("thresholds/duration", context_.thresh_duration_))
     ROS_FATAL("Failed to get thresholds/duration parameter.");
 
-  // Apply corrections?
-  if (!nh.getParam("correct/imu", correct_imu_))
-    ROS_FATAL("Failed to get correct/imu parameter.");
-  if (!nh.getParam("correct/light", correct_light_))
-    ROS_FATAL("Failed to get correct/light parameter.");
+  // Whether to apply light corrections
+  if (!nh.getParam("correct", context_.correct))
+    ROS_FATAL("Failed to get correct parameter.");
 
-  // Use data?
-  bool use_imu, use_light;
-  if (!nh.getParam("use/imu", use_imu))
-    ROS_FATAL("Failed to get use/imu parameter.");
-  if (!nh.getParam("use/light", use_light))
-    ROS_FATAL("Failed to get use/light parameter.");
-
-  // Get the tracker update rate. Anything over the IMU rate is really not
-  // adding much, since we don't have a good dynamics model.
+  // Get the tracker update rate.
   double rate = 100;
-  if (!nh.getParam("rate",rate))
+  if (!nh.getParam("rate", rate))
     ROS_FATAL("Failed to get rate parameter.");
 
   // Initial estimates
@@ -445,15 +466,15 @@ int main(int argc, char **argv) {
   UKF::Vector<3> est_velocity(0, 0, 0);
   if (!GetVectorParam(nh, "initial_estimate/velocity", est_velocity))
     ROS_FATAL("Failed to get velocity parameter.");
-  UKF::Vector<3> est_angvel(0, 0, 0);
-  if (!GetVectorParam(nh, "initial_estimate/angvel", est_angvel))
+  UKF::Vector<3> est_omega(0, 0, 0);
+  if (!GetVectorParam(nh, "initial_estimate/omega", est_omega))
     ROS_FATAL("Failed to get angular_velocity parameter.");
   UKF::Vector<3> est_acceleration(0, 0, 0);
   if (!GetVectorParam(nh, "initial_estimate/acceleration", est_acceleration))
     ROS_FATAL("Failed to get acceleration parameter.");
-  UKF::Vector<3> est_gyro_bias(0, 0, 0);
-  if (!GetVectorParam(nh, "initial_estimate/gyro_bias", est_gyro_bias))
-    ROS_FATAL("Failed to get gyro_bias parameter.");
+  UKF::Vector<3> est_alpha(0, 0, 0);
+  if (!GetVectorParam(nh, "initial_estimate/alpha", est_alpha))
+    ROS_FATAL("Failed to get alpha parameter.");
 
   // Initial covariances
   UKF::Vector<3> cov_position(0, 0, 0);
@@ -465,16 +486,15 @@ int main(int argc, char **argv) {
   UKF::Vector<3> cov_velocity(0, 0, 0);
   if (!GetVectorParam(nh, "initial_covariance/velocity", cov_velocity))
     ROS_FATAL("Failed to get velocity parameter.");
-  UKF::Vector<3> cov_angvel(0, 0, 0);
-  if (!GetVectorParam(nh, "initial_covariance/angvel", cov_angvel))
-    ROS_FATAL("Failed to get angular_velocity parameter.");
+  UKF::Vector<3> cov_omega(0, 0, 0);
+  if (!GetVectorParam(nh, "initial_covariance/omega", cov_omega))
+    ROS_FATAL("Failed to get omega parameter.");
   UKF::Vector<3> cov_accel(0, 0, 0);
   if (!GetVectorParam(nh, "initial_covariance/acceleration", cov_accel))
     ROS_FATAL("Failed to get acceleration parameter.");
-  UKF::Vector<3> cov_gyro_bias(0, 0, 0);
-  if (!GetVectorParam(nh, "initial_covariance/gyro_bias", cov_gyro_bias))
-    ROS_FATAL("Failed to get gyro_bias parameter.");
-  UKF::Vector<3> cov_accel_bias(0, 0, 0);
+  UKF::Vector<3> cov_alpha(0, 0, 0);
+  if (!GetVectorParam(nh, "initial_covariance/alpha", cov_alpha))
+    ROS_FATAL("Failed to get alpha parameter.");
 
   // Noise
   UKF::Vector<3> noise_position(0, 0, 0);
@@ -486,57 +506,64 @@ int main(int argc, char **argv) {
   UKF::Vector<3> noise_velocity(0, 0, 0);
   if (!GetVectorParam(nh, "process_noise/velocity", noise_velocity))
     ROS_FATAL("Failed to get velocity parameter.");
-  UKF::Vector<3> noise_angvel(0, 0, 0);
-  if (!GetVectorParam(nh, "process_noise/angvel", noise_angvel))
-    ROS_FATAL("Failed to get angular_velocity parameter.");
+  UKF::Vector<3> noise_omega(0, 0, 0);
+  if (!GetVectorParam(nh, "process_noise/omega", noise_omega))
+    ROS_FATAL("Failed to get omega parameter.");
   UKF::Vector<3> noise_accel(0, 0, 0);
   if (!GetVectorParam(nh, "process_noise/acceleration", noise_accel))
     ROS_FATAL("Failed to get acceleration parameter.");
-  UKF::Vector<3> noise_gyro_bias(0, 0, 0);
-  if (!GetVectorParam(nh, "process_noise/gyro_bias", noise_gyro_bias))
-    ROS_FATAL("Failed to get gyro_bias parameter.");
+  UKF::Vector<3> noise_alpha(0, 0, 0);
+  if (!GetVectorParam(nh, "process_noise/alpha", noise_alpha))
+    ROS_FATAL("Failed to get alpha parameter.");
 
   // Setup the filter
   filter_.state.set_field<Position>(est_position);
   filter_.state.set_field<Attitude>(est_attitude);
   filter_.state.set_field<Velocity>(est_velocity);
-  filter_.state.set_field<AngularVelocity>(est_angvel);
+  filter_.state.set_field<Omega>(est_omega);
   filter_.state.set_field<Acceleration>(est_acceleration);
-  filter_.state.set_field<GyroBias>(est_gyro_bias);
+  filter_.state.set_field<Alpha>(est_alpha);
   filter_.covariance = State::CovarianceMatrix::Zero();
   filter_.covariance.diagonal() <<
     cov_position[0], cov_position[1], cov_position[2],
     cov_attitude[0], cov_attitude[1], cov_attitude[2],
     cov_velocity[0], cov_velocity[1], cov_velocity[2],
-    cov_angvel[0], cov_angvel[1], cov_angvel[2],
+    cov_omega[0], cov_omega[1], cov_omega[2],
     cov_accel[0], cov_accel[1], cov_accel[2],
-    cov_gyro_bias[0], cov_gyro_bias[1], cov_gyro_bias[2];
+    cov_alpha[0], cov_alpha[1], cov_alpha[2];
   filter_.process_noise_covariance = State::CovarianceMatrix::Zero();
   filter_.process_noise_covariance.diagonal() <<
     noise_position[0], noise_position[1], noise_position[2],
     noise_attitude[0], noise_attitude[1], noise_attitude[2],
     noise_velocity[0], noise_velocity[1], noise_velocity[2],
-    noise_angvel[0], noise_angvel[1], noise_angvel[2],
+    noise_omega[0], noise_omega[1], noise_omega[2],
     noise_accel[0], noise_accel[1], noise_accel[2],
-    noise_gyro_bias[0], noise_gyro_bias[1], noise_gyro_bias[2];
+    noise_alpha[0], noise_alpha[1], noise_alpha[2];
 
   // Subscribe to the motion and light callbacks
   ros::Subscriber sub_lighthouse  =
-    nh.subscribe("/lighthouses", 10, LighthouseCallback);
+    nh.subscribe("/lighthouses", 1000, LighthouseCallback);
   ros::Subscriber sub_tracker  =
-    nh.subscribe("/trackers", 10, TrackerCallback);
-  ros::Subscriber sub_light;
-  ros::Subscriber sub_imu;
-  if (use_imu)
-    sub_imu = nh.subscribe("/imu", 10, ImuCallback);
-  if (use_light)
-    sub_light = nh.subscribe("/light", 10, LightCallback);
-
+    nh.subscribe("/trackers", 1000, TrackerCallback);
+  ros::Subscriber sub_light =
+    nh.subscribe("/light", 1000, LightCallback);
+  ros::Subscriber sub_imu =
+    nh.subscribe("/imu", 1000, ImuCallback);
+  
   // Markers showing sensor positions
   pub_pose_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>
     (topic_pose, 0);
   pub_twist_ = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>
     (topic_twist, 0);
+
+  // If reading the configuration file results in inserting the correct
+  // number of static transforms into the problem, then we can publish
+  // the solution for use by other entities in the system.
+  if (ReadConfig(calfile_, lighthouses_, trackers_)) {
+    ROS_INFO("Read transforms from calibration");
+  } else {
+    ROS_INFO("Could not read calibration file");
+  }
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(
