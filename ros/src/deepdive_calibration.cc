@@ -77,7 +77,7 @@ std::map<ros::Time, Measurement> measurements_;
 std::map<ros::Time, geometry_msgs::TransformStamped> corrections_;
 
 // Global strings
-std::string cfgfile_ = "deepdive.tf2";
+std::string calfile_ = "deepdive.tf2";
 std::string frame_parent_ = "world";
 std::string frame_child_ = "body";
 
@@ -140,7 +140,7 @@ void SendStaticTransform(geometry_msgs::TransformStamped const& tfs) {
 
 int ReadConfig() {
   // Entries take the form x y z qx qy qz qw parent child
-  std::ifstream infile(cfgfile_);
+  std::ifstream infile(calfile_);
   if (!infile.is_open()) {
     ROS_WARN("Could not open config file for reading");
     return 0;
@@ -182,7 +182,7 @@ int ReadConfig() {
 }
 
 int WriteConfig() {
-  std::ofstream outfile(cfgfile_);
+  std::ofstream outfile(calfile_);
   if (!outfile.is_open()) {
     ROS_WARN("Could not open config file for writing");
     return 0;
@@ -946,8 +946,8 @@ int main(int argc, char **argv) {
   }
 
   // Get the parent information
-  if (!nh.getParam("cfgfile", cfgfile_))
-    ROS_FATAL("Failed to get the cfgfile file.");
+  if (!nh.getParam("calfile", calfile_))
+    ROS_FATAL("Failed to get the calfile file.");
 
   // Get some global information
   if (!nh.getParam("frames/parent", frame_parent_))

@@ -1,0 +1,132 @@
+# CALIBRATION PARAMETERS
+#
+# The calibration node is responsible for estimating and maintaining the
+# fixed transforms from the world to lighthouse, and from the set of
+# rigidly connected trackers to what we consider to be the body frame. It
+# does so by framing the localization problem as least-square error
+# minimization over a connected graph
+#
+# Our approach uses only light measurements and pose corrections to solve
+# for the lighthouse positions in the world frame and the transforms of
+# the trackers (mechanical frame) with respect to the body frame..
+#
+# If the calibration procedure works as expected, we'll have a set of
+# lighthouse -> world and tracker -> tracker/body transforms. We'll then
+# write these to a calibration file, which is written to the default ROS
+# working directory (~/.ros) and persisted across restarts.
+
+# GENERAL OPTIONS
+
+# Parent frame is the "world" frame, and child frame is typically "body",
+# but these may vary if you are tracking multiple rigid bodies
+frames:
+  parent:           "world"
+  child:            "body"
+
+# Thresholds used to reject measurements
+thresholds:
+  count:            4          # Min pulses/sweep to add to solver
+  angle:            60.0       # Threshold on angle (in degres)
+  duration:         1.0        # Threshod on duration (in microsecs)
+  correction:       0.01       # 100ms threshold on mapped time
+
+# Publish rviz markers for the sensors
+visualize:          true
+
+# List of lighthouses to be included in tracking
+lighthouses:
+  - "2935772913"
+  - "668207140"
+
+# List of trackers to be included in tracking (see blocks below)
+trackers:
+  - "tracker_port"
+  - "tracker_stbd"
+
+# Tracker with default extrinsics (body -> tracker frame transform)
+tracker_port:
+  serial:           "LHR-08DE340B"
+  extrinsics:       [0.000, -0.1425, -0.162,  0.7071, 0, 0, 0.7071]
+
+# Tracker with default extrinsics (body -> tracker frame transform)
+tracker_stbd:
+  serial:           "LHR-08DDBC05"
+  extrinsics:       [0.000,  0.1425, -0.162, -0.7071, 0, 0, 0.7071]
+
+# CALIBRATION OPTIONS
+
+# Calibration file is stored relative to ROS working directory by default
+cfgfile:            "granite.tf2"
+
+# Maximum resolution (time difference) between poses in the graph
+resolution:         0.01
+
+# Apply light corrections broadcast over OOTX
+correct:            true
+
+# Lock the Z coordinate of the body-frame (force solution on Z plane)
+force2d:            true
+
+# What else to refine, besides the lighthouse ans sensor positions
+refine:
+  lighthouses:      true       # Refine lighthouse positions
+  extrinsics:       false      # If false tracker frame is the body frame
+  trajectory:       false      # If false we will use the corrections
+  sensors:          false      # Refine sensor positions
+  params:           false      # Refine lighthouse parameters
+  head:             false      # Refine head transform
+
+# Relative weighting of measurements (light/correction only used for)
+weight:
+  light:            1.0
+  correction:       1.0
+  motion:           1.0
+
+# These are the parameters used by the non-linear least squares optimizer
+solver:
+  max_time:         30.0       # In seconds
+  max_iterations:   100        # Number of iterations
+  threads:          4          # Number of threads
+  debug:            true       # Provide debug output?
+
+# TRACKER PARAMETERS
+
+# Topics for publishing data
+topics:
+  pose:             "/loc/truth/pose"     # Topic for publishing pose
+  twist:            "/loc/truth/twist"    # Topic for publishing twist
+
+# Gravity vector in parent frame
+gravity:            [0.0, 0.0, -9.80665]
+
+# Fixed tracking rate of filter
+rate:               62.5
+
+# Initial state value
+initial_estimate:
+  position:         [0, 0, 0]             # Initial pose (world frame)
+  velocity:         [0, 0, 0]             # Initial velocity (world frame)
+  acceleration:     [0, 0, 0]             # Initial acceleration (world frame)
+  attitude:         [0, 0, 0, 1]          # Initial attitude
+  omega:            [0, 0, 0]             # Initial omega (body frame)
+  alpha:            [0, 0, 0]             # Initial alpha (world frame)
+
+# Values the covariance in state estimate is initialized to
+initial_covariance:
+  position:         [10, 10, 10]
+  velocity:         [1.0e-03, 1.0e-03, 1.0e-03]
+  acceleration:     [1.0e-03, 1.0e-03, 1.0e-03]
+  attitude:         [10, 10, 10]
+  omega:            [1.0e-03, 1.0e-03, 1.0e-03]
+  alpha:            [1.0e-03, 1.0e-03, 1.0e-03]
+
+# Process noise that is added when the filter is updated
+process_noise:
+  position:         [1.0e-08, 1.0e-08, 1.0e-08]
+  velocity:         [1.0e-06, 1.0e-06, 1.0e-06]
+  acceleration:     [1.0e-10, 1.0e-10, 1.0e-10]
+  attitude:         [1.0e-08, 1.0e-08, 1.0e-08]
+  omega:            [1.0e-06, 1.0e-06, 1.0e-06]
+  alpha:            [1.0e-06, 1.0e-06, 1.0e-06]
+
+# END OF CONFIGURATION
