@@ -43,14 +43,16 @@ struct Context {
   Eigen::Affine3d bTi;          // IMU to body frame
   Eigen::Affine3d bTt;          // Tracking to body transform
   Eigen::Vector3d sensor;       // Sensor position in the tracking frame
-  Eigen::Vector3d gravity;      // Gravity in the world frame
+  UKF::Vector<3> gravity;       // Gravity in the world frame
   deepdive_ros::Motor params;   // Lighthouse parameters
   uint8_t axis;                 // Tracking axis - horizontal (0), vertical (1)
   bool correct;                 // Should we correct angles using parameters
-  double thresh_angle_;         // Threshold on angle acceptance (in degrees)
-  double thresh_duration_;      // Threshold on duration acceptance (in us)
+  double thresh_angle;          // Threshold on angle acceptance (in degrees)
+  double thresh_duration;       // Threshold on duration acceptance (in us)
+  double thresh_count;          // Threshold on measurement count
   std::string frame_parent;     // Parent frame "world"
   std::string frame_child;      // Child frame "body"
+  double rate;                  // Targe tracking rate
 };
 
 // TRACKING FILTER
@@ -82,8 +84,8 @@ using State = UKF::StateVector<
   UKF::Field<AngularAcceleration, UKF::Vector<3>>
 >;
 
-// Measurement vector
-using Measurement = UKF::DynamicMeasurementVector<
+// Observation vector
+using Observation = UKF::DynamicMeasurementVector<
   UKF::Field<Accelerometer, UKF::Vector<3>>,
   UKF::Field<Gyroscope, UKF::Vector<3>>,
   UKF::Field<Angle, real_t>
@@ -99,11 +101,11 @@ using Error = UKF::StateVector<
 
 // For tracking
 using TrackingFilter =
-  UKF::SquareRootCore<State, Measurement, UKF::IntegratorRK4>;
+  UKF::SquareRootCore<State, Observation, UKF::IntegratorRK4>;
 
 // For parameter estimation
 using ParameterFilter =
-  UKF::SquareRootParameterEstimationCore<Error, Measurement>;
+  UKF::SquareRootParameterEstimationCore<Error, Observation>;
 
 namespace UKF {
   namespace Parameters {
@@ -114,8 +116,8 @@ namespace UKF {
   }
 
   template <>
-  Measurement::CovarianceVector Measurement::measurement_covariance(
-    (Measurement::CovarianceVector() << 
+  Observation::CovarianceVector Observation::measurement_covariance(
+    (Observation::CovarianceVector() << 
       1.0e-4, 1.0e-4, 1.0e-4,   // (1e-02)^2 meters/sec^2
       1.0e-6, 1.0e-6, 1.0e-6,   // (1e-03)^2 rads/sec
       1.0e-8).finished());      // atan(1/10000)^2 = 1e-08
@@ -142,19 +144,19 @@ namespace UKF {
   }
 
   template <> template <> UKF::Vector<3>
-  Measurement::expected_measurement<State, Accelerometer, Error>(
+  Observation::expected_measurement<State, Accelerometer, Error>(
     State const& state, Error const& input, Context const& context) {
     UKF::Vector<3> const& w = state.get_field<AngularVelocity>();
     UKF::Vector<3> const& p = context.bTi.translation();
     return input.get_field<AccelerometerScale>().cwiseProduct(
-      context.bTi.linear().inverse() * w.cross(w.cross(p)
+      context.bTi.linear().inverse() * w.cross(w.cross(p))
         + state.get_field<Acceleration>()
-        + state.get_field<AccelerometerBias>()
-        + state.get_field<Attitude>() * context.gravity));
+        + input.get_field<AccelerometerBias>()
+        + state.get_field<Attitude>() * context.gravity);
   }
 
   template <> template <> UKF::Vector<3>
-  Measurement::expected_measurement<State, Gyroscope, Error>(
+  Observation::expected_measurement<State, Gyroscope, Error>(
     State const& state, Error const& input, Context const& context) {
     return input.get_field<GyroscopeScale>().cwiseProduct(
       context.bTi.linear().inverse() * state.get_field<AngularVelocity>()
@@ -162,7 +164,7 @@ namespace UKF {
   }
 
   template <> template <> real_t
-  Measurement::expected_measurement<State, Angle, Error>(
+  Observation::expected_measurement<State, Angle, Error>(
     State const& state, Error const& input, Context const& context) {
       // Convert the current state estimate to a transform
       Eigen::Affine3d wTb;
@@ -192,7 +194,7 @@ namespace UKF {
 
 static LighthouseMap lighthouses_;          // List of lighthouses
 static TrackerMap trackers_;                // List of trackers
-static Context context_;                    // Measurement context
+static Context context_;                    // Observation context
 static TrackingFilter filter_;              // Tracking filter
 
 // UTILITY FUNCTIONS
@@ -201,9 +203,9 @@ double Delta(ros::Time const& now) {
   static ros::Time last = ros::Time::now();
   double dt = (now - last).toSec();
   last = now;
-  if (dt > rate_ * 2)
+  if (dt > context_.rate * 2)
     ROS_WARN_STREAM_THROTTLE(1, "Made dt call at > 2x target period");
-  return (dt > 0 ? dt : rate_);
+  return (dt > 0 ? dt : context_.rate);
 }
 
 bool GetVectorParam(ros::NodeHandle &nh,
@@ -226,7 +228,7 @@ bool GetQuaternionParam(ros::NodeHandle &nh,
   data.y() = tmp[1];
   data.z() = tmp[2];
   data.w() = tmp[3];
-  return
+  return true;
 }
 
 // CALLBACKS
@@ -235,174 +237,174 @@ bool GetQuaternionParam(ros::NodeHandle &nh,
 // - Single lighthouse in 'A' mode : 120Hz (60Hz per axis)
 // - Dual lighthouses in b/A or b/c modes : 120Hz (30Hz per axis)
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
-  // Get a delta t for this measurement
   double dt = Delta(ros::Time::now());
   // Check that we are recording and that the tracker/lighthouse is ready
-  if (trackers_.find(msg->header.frame_id) == trackers_.end() ||
-    lighthouses_.find(msg->lighthouse) == lighthouses_.end() ||
-    !trackers_[msg->header.frame_id].ready ||
-    !lighthouses_[msg->lighthouse].ready) return;
-  // Get references to the
-  Tracker const& tracker = trackers_[msg->header.frame_id];
-  Lighthouse const& lighthouse = lighthouses_[msg->lighthouse];
+  context_.tracker = trackers_.find(msg->header.frame_id)
+  if (context_.tracker == trackers_.end() || !context_.tracker->ready) {
+    ROS_INFO_STREAM_THROTTLE(1, "Tracker not found or ready");
+    return;
+  }
+  // Check that we are recording and that the tracker/lighthouse is ready
+  context_.lighthouse = lighthouses_.find(msg->lighthouse)
+  if (context_.lighthouse == lighthouse.end() || !context_.lighthouse->ready) {
+    ROS_INFO_STREAM_THROTTLE(1, "Lighthouse not found or ready");
+    return;
+  }
+  // Set the measurement axis
+  context_.axis = msg->axis;
   // Do a simple clean of the incoming data, looking to see if the pulse angle
   // and duration exceed some threshold values, and that the sensor id is valid
   std::vector<deepdive_ros::Pulse> data;
   for (size_t i = 0; i < msg->pulses.size(); i++) {
     // Basic sanity checks on the data
-    if (fabs(msg->pulses[i].angle) > context.thresh_angle * M_PI / 180.0) {
+    if (fabs(msg->pulses[i].angle) > context_.thresh_angle * M_PI / 180.0) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on angle");
       return;
     }
-    if (fabs(msg->pulses[i].duration) < context.thresh_duration * 1e-6) {
+    if (fabs(msg->pulses[i].duration) < context_.thresh_duration * 1e-6) {
       ROS_INFO_STREAM_THROTTLE(1, "Rejected based on duration");
       return;
     }
     if (msg->pulses[i].sensor >= NUM_SENSORS) {
-      ROS_INFO_STREAM_THROTTLE(1, "Rejected based on sensor id");
+      ROS_INFO_STREAM_THROTTLE(1, "Rejected based on invalid sensor id");
       return;
     }
     data.push_back(msg->pulses[i]);
   }
-  if (data.empty())
-    ROS_INFO_STREAM_THROTTLE(1, "No data, so skipping correction.");
-  // Check that calibration has produced a lighthouse transform, or else we
-  // don't have a wortld reference against which to measure the angle.
-  context_.axis = it->axis;
-  context_.params = lighthouse.params;
-  try {
-    static geometry_msgs::TransformStamped tf;
-    // Get a world <-> lighthouse transform
-    tf = buffer_.lookupTransform(
-      frame_parent_, msg->lighthouse, ros::Time(0));
-    context_.lTw.translation() = Eigen::Vector3d(
-      tf.transform.translation.x,
-      tf.transform.translation.y,
-      tf.transform.translation.z);
-    context_.lTw.linear() = Eigen::Quaterniond(
-      tf.transform.rotation.w,
-      tf.transform.rotation.x,
-      tf.transform.rotation.y,
-      tf.transform.rotation.z).toRotationMatrix();
-    // Get a body <-> tracking transform
-    tf = buffer_.lookupTransform(
-      frame_child_, msg->header.frame_id + "/light", ros::Time(0));
-    context.bTt.translation() = Eigen::Vector3d(
-      tf.transform.translation.x,
-      tf.transform.translation.y,
-      tf.transform.translation.z);
-    context.bTt.linear() = Eigen::Quaterniond(
-      tf.transform.rotation.w,
-      tf.transform.rotation.x,
-      tf.transform.rotation.y,
-      tf.transform.rotation.z).toRotationMatrix();
-  } catch (tf2::TransformException &ex) {
-    ROS_INFO_STREAM_THROTTLE(1, "Rejected based on transform unavailability");
-    return;
-  }
-  // Process update
+  if (data.size() < context_.thresh_count)
+    ROS_INFO_STREAM_THROTTLE(1, "Not enough data so skipping bundle.");
+  // Propagate the state forward
   filter_.a_priori_step(dt);
-  for (it = msg->pulses.begin(); it != msg->pulses.end(); i++) {
-    context_.sensor = tracker.sensors[it->sensor];
-    Measurement measurement;
-    measurement.set_field<Angle>(it->angle);
-    filter_.innovation_step(measurement, tracker.error, context_);
+  std::vector<deepdive_ros::Pulse>::iterator it;
+  for (it = msg->pulses.begin(); it != msg->pulses.end(); it++) {
+    context_.sensor = it->sensor;
+    Observation obs;
+    obs.set_field<Angle>(it->angle);
+    filter_.innovation_step(obs, tracker.errors, context_);
   }
   filter_.a_posteriori_step();
 }
 
 // This will be called at approximately 250Hz
 void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
-  // Get the delta-t
-  double dt= Delta(ros::Time::now());
+  double dt = Delta(ros::Time::now());
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id)
-  if (tracker == trackers_.end()) {
-    ROS_INFO_STREAM_THROTTLE(1, "Could not find tracker");
+  if (tracker == trackers_.end() || !tracker->ready) {
+    ROS_INFO_STREAM_THROTTLE(1, "Tracker not found or ready");
+    return;
+  }
+  // Make sure we have a filter setup for this
+  ErrorMap::iterator error = errors.find(msg->header.frame_id);
+  if (error == error.end()) {
+    ROS_INFO_STREAM_THROTTLE(1, "Tracker error filter not initialized");
     return;
   }
   // Get the measurements
-  static Eigen::Vector3d acc;
-  acc(0) = msg->linear_acceleration.x;
-  acc(1) = msg->linear_acceleration.y;
-  acc(2) = msg->linear_acceleration.z;
-  static Eigen::Vector3d gyr;
-  gyr(0) = msg->angular_velocity.x;
-  gyr(1) = msg->angular_velocity.y;
-  gyr(2) = msg->angular_velocity.z;
-  // Update the context with a body -> imu transform for the current tracker.
-  // This should return immediately, as the transform is captured by a buffer
-  // running in the background.
-  try {
-    static geometry_msgs::TransformStamped tf;
-    tf = buffer_.lookupTransform(
-      frame_child_, msg->header.frame_id + "/imu", ros::Time(0));
-    context.bTi.translation() = Eigen::Vector3d(
-      tf.transform.translation.x,
-      tf.transform.translation.y,
-      tf.transform.translation.z);
-    context.bTi.linear() = Eigen::Quaterniond(
-      tf.transform.rotation.w,
-      tf.transform.rotation.x,
-      tf.transform.rotation.y,
-      tf.transform.rotation.z).toRotationMatrix();
-  } catch (tf2::TransformException &ex) {
-    ROS_INFO_STREAM_THROTTLE(1, "Rejected based on transform unavailability");
-    return;
-  }
+  Eigen::Vector3d acc(
+    msg->linear_acceleration.x,
+    msg->linear_acceleration.y,
+    msg->linear_acceleration.z);
+  Eigen::Vector3d gyr(
+    msg->angular_velocity.x,
+    msg->angular_velocity.y,
+    msg->angular_velocity.z);
+  // TODO(Andrew) inject the transforms
   // Create a measurement
-  static Measurement measurement;
-  measurement.set_field<Accelerometer>(acc);
-  measurement.set_field<Gyroscope>(gyr);
+  Observation obs;
+  obs.set_field<Accelerometer>(acc);
+  obs.set_field<Gyroscope>(gyr);
   // Propagate the IMU error filter using the tracking filter state
   tracker->error.a_priori_step();
-  tracker->error.innovation_step(measurement, filter_.state, context_);
+  tracker->error.innovation_step(obs, filter_.state, context_);
   tracker->error.a_posteriori_step(); 
   // Propagate the filter
   filter_.a_priori_step(dt);
-  filter_.innovation_step(measurement, tracker->error.state, context_);
+  filter_.innovation_step(obs, tracker->error.state, context_);
   filter_.a_posteriori_step();
 }
 
-void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
-  // Check that we are recording and that the tracker/lighthouse is ready
-  if (!recording_)
-    return;
-  std::vector<geometry_msgs::TransformStamped>::const_iterator it;
-  for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
-    if (it->header.frame_id == frame_parent_ &&
-        it->child_frame_id == frame_child_) {
-      ROS_INFO_THROTTLE(1, "Found a correction");
-      corrections_[ros::Time::now()] = *it;
+void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg) {
+  std::vector<deepdive_ros::Lighthouse>::const_iterator it;
+  for (it = msg->lighthouses.begin(); it != msg->lighthouses.end(); it++) {
+    if (lighthouses_.find(it->serial) == lighthouses_.end())
+      return;
+    Lighthouse & lighthouse = lighthouses_[it->serial];
+    for (size_t i = 0; i < it->motors.size() && i < NUM_MOTORS; i++) {
+      lighthouse.params[i][CAL_PHASE] = it->motors[i].phase;
+      lighthouse.params[i][CAL_TILT] = it->motors[i].tilt;
+      lighthouse.params[i][CAL_GIB_PHASE] = it->motors[i].gibphase;
+      lighthouse.params[i][CAL_GIB_MAG] = it->motors[i].gibmag;
+      lighthouse.params[i][CAL_CURVE] = it->motors[i].curve;
     }
+    if (!lighthouse.ready)
+      ROS_INFO_STREAM("Received data from lighthouse " << it->serial);
+    lighthouse.ready = true;
   }
 }
 
-bool TriggerCallback(std_srvs::Trigger::Request  &req,
-                     std_srvs::Trigger::Response &res)
-{
-  if (!recording_) {
-    res.success = true;
-    res.message = "Recording started.";
+void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
+  // Iterate over the trackers in this message
+  std::vector<deepdive_ros::Tracker>::const_iterator it;
+  for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
+    if (trackers_.find(it->serial) == trackers_.end())
+      return;
+    // Convert to an angle-axis representation
+    Eigen::Quaterniond q(
+      it->head_transform.rotation.w,
+      it->head_transform.rotation.x,
+      it->head_transform.rotation.y,
+      it->head_transform.rotation.z);
+    Eigen::AngleAxisd aa(q);
+    Eigen::Affine3d tTh;
+    tTh.linear() = q.toRotationMatrix();
+    tTh.translation() = Eigen::Vector3d(
+      it->head_transform.translation.x,
+      it->head_transform.translation.y,
+      it->head_transform.translation.z);
+    // Modify the tracker
+    Tracker & tracker = trackers_[it->serial];
+    tracker.tTh[0] = tTh.translation()[0];
+    tracker.tTh[1] = tTh.translation()[1];
+    tracker.tTh[2] = tTh.translation()[2];
+    tracker.tTh[3] = aa.angle() * aa.axis()[0];
+    tracker.tTh[4] = aa.angle() * aa.axis()[1];
+    tracker.tTh[5] = aa.angle() * aa.axis()[2];
+    for (size_t i = 0; i < it->sensors.size() &&  i < NUM_SENSORS; i++) {
+      tracker.sensors[6*i+0] = it->sensors[i].position.x;
+      tracker.sensors[6*i+1] = it->sensors[i].position.y;
+      tracker.sensors[6*i+2] = it->sensors[i].position.z;
+      tracker.sensors[6*i+3] = it->sensors[i].normal.x;
+      tracker.sensors[6*i+4] = it->sensors[i].normal.y;
+      tracker.sensors[6*i+5] = it->sensors[i].normal.z;
+    }
+    // Invert the transformation retain frame hierarchy in TF2
+    Eigen::Affine3d hTt = tTh.inverse();
+    q = Eigen::Quaterniond(hTt.linear());
+    // Add the transforms
+    geometry_msgs::TransformStamped tfs;
+    tfs.header.frame_id = it->serial;
+    tfs.child_frame_id = it->serial + "/light";
+    tfs.transform.translation.x = hTt.translation()[0];
+    tfs.transform.translation.y = hTt.translation()[1];
+    tfs.transform.translation.z = hTt.translation()[2];
+    tfs.transform.rotation.w = q.w();
+    tfs.transform.rotation.x = q.x();
+    tfs.transform.rotation.y = q.y();
+    tfs.transform.rotation.z = q.z();
+    SendStaticTransform(tfs);
+    tfs.header.frame_id = it->serial + "/light";
+    tfs.child_frame_id = it->serial + "/imu";
+    tfs.transform = it->imu_transform;
+    SendStaticTransform(tfs);
+    // Print update
+    ROS_INFO_STREAM("Received data from tracker " << it->serial);
+    tracker.ready = true;
   }
-  if (recording_) {
-    // Solve the problem
-    res.success = Solve();
-    if (res.success)
-      res.message = "Recording stopped. Solution found.";
-    else
-      res.message = "Recording stopped. Solution not found.";
-    // Clear all the data and corrections
-    measurements_.clear();
-    corrections_.clear();
-  }
-  // Toggle recording state
-  recording_ = !recording_;
-  // Success
-  return true;
 }
 
-// Main entry point of application
+// MAIN ENTRY POINT OF APPLICATION
+
 int main(int argc, char **argv) {
   // Initialize ROS and create node handle
   ros::init(argc, argv, "deepdive_tracker");
@@ -446,6 +448,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get thresholds/angle parameter.");
   if (!nh.getParam("thresholds/duration", context_.thresh_duration_))
     ROS_FATAL("Failed to get thresholds/duration parameter.");
+  if (!nh.getParam("thresholds/count", context_.thresh_count_))
+    ROS_FATAL("Failed to get thresholds/count parameter.");
 
   // Whether to apply light corrections
   if (!nh.getParam("correct", context_.correct))

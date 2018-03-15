@@ -35,28 +35,27 @@ visualize:          true
 
 # List of lighthouses to be included in tracking
 lighthouses:
-  - "2935772913"
-  - "668207140"
+  - "lighthouse_back"
+  - "lighthouse_near"
+lighthouse_back:
+  serial:          "2935772913"
+  transform:       [-0.042, -0.971, -1.812, -0.3978,  0.0112,  0.0022,  0.9174]
+lighthouse_near:
+  serial:          "668207140"
+  transform:       [ 0.624,  1.151, -1.691,  0.1392, -0.3011,  0.3968,  0.8559]
 
 # List of trackers to be included in tracking (see blocks below)
 trackers:
   - "tracker_port"
   - "tracker_stbd"
-
-# Tracker with default extrinsics (body -> tracker frame transform)
 tracker_port:
-  serial:           "LHR-08DE340B"
-  extrinsics:       [0.000, -0.1425, -0.162,  0.7071, 0, 0, 0.7071]
-
-# Tracker with default extrinsics (body -> tracker frame transform)
+  serial:          "LHR-08DE340B"
+  transform:       [0.000, -0.1425, -0.162,  0.7071,  0.0000,  0.0000,  0.7071]
 tracker_stbd:
-  serial:           "LHR-08DDBC05"
-  extrinsics:       [0.000,  0.1425, -0.162, -0.7071, 0, 0, 0.7071]
+  serial:          "LHR-08DDBC05"
+  transform:       [0.000,  0.1425, -0.162, -0.7071,  0.0000,  0.0000,  0.7071]
 
 # CALIBRATION OPTIONS
-
-# Calibration file is stored relative to ROS working directory by default
-cfgfile:            "granite.tf2"
 
 # Maximum resolution (time difference) between poses in the graph
 resolution:         0.001

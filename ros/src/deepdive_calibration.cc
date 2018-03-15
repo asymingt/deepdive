@@ -902,12 +902,35 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get the visualize parameter.");
 
   // Get the parent information
-  std::vector<std::string> lighthouses;
+ std::vector<std::string> lighthouses;
   if (!nh.getParam("lighthouses", lighthouses))
     ROS_FATAL("Failed to get the lighthouse list.");
   std::vector<std::string>::iterator it;
-  for (it = lighthouses.begin(); it != lighthouses.end(); it++)
-    lighthouses_[*it].ready = false;
+  for (it = lighthouses.begin(); it != lighthouses.end(); it++) {
+    std::string serial;
+    if (!nh.getParam(*it + "/serial", serial))
+      ROS_FATAL("Failed to get the lighthouse serial.");
+    std::vector<double> transform;
+    if (!nh.getParam(*it + "/transform", transform))
+      ROS_FATAL("Failed to get the lighthouse transform.");
+    if (transform.size() != 7) {
+      ROS_FATAL("Failed to parse lighthouse transform.");
+      continue;
+    }
+    Eigen::Quaterniond q(
+      transform[6],  // qw
+      transform[3],  // qx
+      transform[4],  // qy
+      transform[5]); // qz
+    Eigen::AngleAxisd aa(q);
+    lighthouses_[serial].wTl[0] = transform[0];
+    lighthouses_[serial].wTl[1] = transform[1];
+    lighthouses_[serial].wTl[2] = transform[2];
+    lighthouses_[serial].wTl[3] = aa.angle() * aa.axis()[0];
+    lighthouses_[serial].wTl[4] = aa.angle() * aa.axis()[1];
+    lighthouses_[serial].wTl[5] = aa.angle() * aa.axis()[2];
+    lighthouses_[serial].ready = false;
+  }
 
   // Get the parent information
   std::vector<std::string> trackers;
@@ -918,22 +941,22 @@ int main(int argc, char **argv) {
     std::string serial;
     if (!nh.getParam(*jt + "/serial", serial))
       ROS_FATAL("Failed to get the tracker serial.");
-    std::vector<double> extrinsics;
-    if (!nh.getParam(*jt + "/extrinsics", extrinsics))
-      ROS_FATAL("Failed to get the tracker extrinsics.");
-    if (extrinsics.size() != 7) {
-      ROS_FATAL("Failed to parse tracker extrinsics.");
+    std::vector<double> transform;
+    if (!nh.getParam(*jt + "/transform", transform))
+      ROS_FATAL("Failed to get the tracker transform.");
+    if (transform.size() != 7) {
+      ROS_FATAL("Failed to parse tracker transform.");
       continue;
     }
     Eigen::Quaterniond q(
-      extrinsics[6],  // qw
-      extrinsics[3],  // qx
-      extrinsics[4],  // qy
-      extrinsics[5]); // qz
+      transform[6],  // qw
+      transform[3],  // qx
+      transform[4],  // qy
+      transform[5]); // qz
     Eigen::AngleAxisd aa(q);
-    trackers_[serial].bTh[0] = extrinsics[0];
-    trackers_[serial].bTh[1] = extrinsics[1];
-    trackers_[serial].bTh[2] = extrinsics[2];
+    trackers_[serial].bTh[0] = transform[0];
+    trackers_[serial].bTh[1] = transform[1];
+    trackers_[serial].bTh[2] = transform[2];
     trackers_[serial].bTh[3] = aa.angle() * aa.axis()[0];
     trackers_[serial].bTh[4] = aa.angle() * aa.axis()[1];
     trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];
