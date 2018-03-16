@@ -1,8 +1,10 @@
 #ifndef SRC_DEEPDIVE_HH
 #define SRC_DEEPDIVE_HH
 
-// ROS
+// ROS and TF2
 #include <ros/ros.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 // Messages
 #include <geometry_msgs/TransformStamped.h>
@@ -21,17 +23,33 @@
 #include <map>
 
 // Universal constants
-static constexpr size_t NUM_MOTORS  = 2;
 static constexpr size_t NUM_SENSORS = 32;
-static constexpr size_t NUM_PARAMS  = 5;
+
+// ESSENTIAL STRUCTURES
 
 // Lighthouse parameters
-enum Parameters {
-  CAL_PHASE = 0,
-  CAL_TILT,
-  CAL_GIB_PHASE,
-  CAL_GIB_MAG,
-  CAL_CURVE
+enum Params {
+  PARAM_PHASE,
+  PARAM_TILT,
+  PARAM_GIB_PHASE,
+  PARAM_GIB_MAG,
+  PARAM_CURVE,
+  NUM_PARAMS
+};
+
+// Lighthouse parameters
+enum Errors {
+  ERROR_GYR_BIAS,
+  ERROR_GYR_SCALE,
+  ERROR_ACC_BIAS,
+  ERROR_ACC_SCALE,
+  NUM_ERRORS
+};
+
+enum Motors {
+  MOTOR_VERTICAL,
+  MOTOR_HORIZONTAL,
+  NUM_MOTORS
 };
 
 // Lighthouse data structure
@@ -46,7 +64,9 @@ typedef std::map<std::string, Lighthouse> LighthouseMap;
 struct Tracker {
   double bTh[6];
   double tTh[6];
+  double tTi[6];
   double sensors[NUM_SENSORS*6];
+  double errors[NUM_ERRORS*3];
   bool ready;
 };
 typedef std::map<std::string, Tracker> TrackerMap;
@@ -60,6 +80,20 @@ typedef std::map<ros::Time, Measurement> MeasurementMap;
 
 // Correction data structure
 typedef std::map<ros::Time, geometry_msgs::TransformStamped> CorrectionMap;
+
+// TRANSFORM ENGINE
+
+void SendStaticTransform(geometry_msgs::TransformStamped const& tfs) {
+  static tf2_ros::StaticTransformBroadcaster bc;
+  bc.sendTransform(tfs);
+}
+
+void SendDynamicTransform(geometry_msgs::TransformStamped const& tfs) {
+  static tf2_ros::TransformBroadcaster bc;
+  bc.sendTransform(tfs);
+}
+
+// CONFIG MANAGEMENT
 
 // Parse a human-readable configuration
 bool ReadConfig(std::string const& calfile,
@@ -156,7 +190,117 @@ bool WriteConfig(std::string const& calfile,
   return true;
 }
 
-// Recursively calculates mean and standard deviation
+// REUSABLE CALLS
+
+void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg,
+  LighthouseMap & lighthouses) {
+  std::vector<deepdive_ros::Lighthouse>::const_iterator it;
+  for (it = msg->lighthouses.begin(); it != msg->lighthouses.end(); it++) {
+    LighthouseMap::iterator lighthouse = lighthouses.find(it->serial);
+    if (lighthouse == lighthouses.end())
+      return;
+    for (size_t i = 0; i < it->motors.size() && i < NUM_MOTORS; i++) {
+      lighthouse->second.params[i][PARAM_PHASE] = it->motors[i].phase;
+      lighthouse->second.params[i][PARAM_TILT] = it->motors[i].tilt;
+      lighthouse->second.params[i][PARAM_GIB_PHASE] = it->motors[i].gibphase;
+      lighthouse->second.params[i][PARAM_GIB_MAG] = it->motors[i].gibmag;
+      lighthouse->second.params[i][PARAM_CURVE] = it->motors[i].curve;
+    }
+    if (!lighthouse->second.ready)
+      ROS_INFO_STREAM("RX data from lighthouse " << it->serial);
+    lighthouse->second.ready = true;
+  }
+}
+
+void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
+  TrackerMap & trackers) {
+  // Iterate over the trackers in this message
+  std::vector<deepdive_ros::Tracker>::const_iterator it;
+  for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
+    TrackerMap::iterator tracker = trackers.find(it->serial);
+    if (tracker == trackers.end())
+      return;
+    for (size_t i = 0; i < it->sensors.size() &&  i < NUM_SENSORS; i++) {
+      tracker->second.sensors[6*i+0] = it->sensors[i].position.x;
+      tracker->second.sensors[6*i+1] = it->sensors[i].position.y;
+      tracker->second.sensors[6*i+2] = it->sensors[i].position.z;
+      tracker->second.sensors[6*i+3] = it->sensors[i].normal.x;
+      tracker->second.sensors[6*i+4] = it->sensors[i].normal.y;
+      tracker->second.sensors[6*i+5] = it->sensors[i].normal.z;
+    }
+    // Add the head -> light transform
+    {
+      // Write to the global data structure
+      Eigen::Quaterniond q(
+        it->head_transform.rotation.w,
+        it->head_transform.rotation.x,
+        it->head_transform.rotation.y,
+        it->head_transform.rotation.z);
+      Eigen::AngleAxisd aa(q);
+      Eigen::Affine3d tTh;
+      tTh.linear() = q.toRotationMatrix();
+      tTh.translation() = Eigen::Vector3d(
+        it->head_transform.translation.x,
+        it->head_transform.translation.y,
+        it->head_transform.translation.z);
+      tracker->second.tTh[0] = tTh.translation()[0];
+      tracker->second.tTh[1] = tTh.translation()[1];
+      tracker->second.tTh[2] = tTh.translation()[2];
+      tracker->second.tTh[3] = aa.angle() * aa.axis()[0];
+      tracker->second.tTh[4] = aa.angle() * aa.axis()[1];
+      tracker->second.tTh[5] = aa.angle() * aa.axis()[2];
+      // Send off the transform
+      Eigen::Affine3d hTt = tTh.inverse();
+      q = Eigen::Quaterniond(hTt.linear());
+      geometry_msgs::TransformStamped tfs;
+      tfs.header.frame_id = it->serial;
+      tfs.child_frame_id = it->serial + "/light";
+      tfs.transform.translation.x = hTt.translation()[0];
+      tfs.transform.translation.y = hTt.translation()[1];
+      tfs.transform.translation.z = hTt.translation()[2];
+      tfs.transform.rotation.w = q.w();
+      tfs.transform.rotation.x = q.x();
+      tfs.transform.rotation.y = q.y();
+      tfs.transform.rotation.z = q.z();
+      SendStaticTransform(tfs);
+    }
+    // Add the imu -> light transform
+    {
+      // Write to the global data structure
+      Eigen::Quaterniond q(
+        it->imu_transform.rotation.w,
+        it->imu_transform.rotation.x,
+        it->imu_transform.rotation.y,
+        it->imu_transform.rotation.z);
+      Eigen::AngleAxisd aa(q);
+      Eigen::Affine3d tTi;
+      tTi.linear() = q.toRotationMatrix();
+      tTi.translation() = Eigen::Vector3d(
+        it->imu_transform.translation.x,
+        it->imu_transform.translation.y,
+        it->imu_transform.translation.z);
+      tracker->second.tTi[0] = tTi.translation()[0];
+      tracker->second.tTi[1] = tTi.translation()[1];
+      tracker->second.tTi[2] = tTi.translation()[2];
+      tracker->second.tTi[3] = aa.angle() * aa.axis()[0];
+      tracker->second.tTi[4] = aa.angle() * aa.axis()[1];
+      tracker->second.tTi[5] = aa.angle() * aa.axis()[2];
+      // Send off the transform
+      geometry_msgs::TransformStamped tfs;  
+      tfs.header.frame_id = it->serial + "/light";
+      tfs.child_frame_id = it->serial + "/imu";
+      tfs.transform = it->imu_transform;
+      SendStaticTransform(tfs);
+    }
+    //  We are now ready
+    if (!tracker->second.ready)
+      ROS_INFO_STREAM("RX data from tracker " << it->serial);
+    tracker->second.ready = true;
+  }
+}
+
+// RUNTIME STATISTICS
+
 class Statistics {
  public:
   // Constructor and initialization

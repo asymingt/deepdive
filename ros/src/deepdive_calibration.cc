@@ -8,7 +8,6 @@
 #include <ros/ros.h>
 
 // Third-party includes
-#include <tf2_ros/static_transform_broadcaster.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <visualization_msgs/MarkerArray.h>
 #include <nav_msgs/Path.h>
@@ -40,16 +39,10 @@
 // GLOBAL PARAMETERS
 
 // List of lighthouses
-static LighthouseMap lighthouses_;
-
-// List of trackers
-static TrackerMap trackers_;
-
-// List of measurements
-static MeasurementMap measurements_;
-
-// Corrections
-static CorrectionMap corrections_;
+LighthouseMap lighthouses_;
+TrackerMap trackers_;
+MeasurementMap measurements_;
+CorrectionMap corrections_;
 
 // Global strings
 std::string calfile_ = "deepdive.tf2";
@@ -103,13 +96,6 @@ ros::Publisher pub_corr_;
 
 // Timer for managing offline
 ros::Timer timer_;
-
-// STATIC TRANSFORM ENGINE
-
-void SendStaticTransform(geometry_msgs::TransformStamped const& tfs) {
-  static tf2_ros::StaticTransformBroadcaster bc;
-  bc.sendTransform(tfs);
-}
 
 // SOLUTION PUBLISHING
 
@@ -241,11 +227,11 @@ struct LightCost {
       // meaning of the calibration parameters based on their name. It might
       // be the case that these value are subtracted, rather than added.
       if (correct_) { 
-        angle[a] -= T(params[CAL_PHASE]);
-        angle[a] -= T(params[CAL_TILT]) * angle[1-a];
-        angle[a] -= T(params[CAL_CURVE]) * angle[1-a] * angle[1-a];
-        angle[a] -= T(params[CAL_GIB_MAG])
-                     * cos(angle[1-a] + T(params[CAL_GIB_PHASE]));
+        angle[a] -= T(params[PARAM_PHASE]);
+        angle[a] -= T(params[PARAM_TILT]) * angle[1-a];
+        angle[a] -= T(params[PARAM_CURVE]) * angle[1-a] * angle[1-a];
+        angle[a] -= T(params[PARAM_GIB_MAG])
+                     * cos(angle[1-a] + T(params[PARAM_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
       residual[i] = angle[a] - T(light_.pulses[i].angle);
@@ -610,135 +596,6 @@ bool Solve() {
 
 // MESSAGE CALLBACKS
 
-void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg) {
-  std::vector<deepdive_ros::Lighthouse>::const_iterator it;
-  for (it = msg->lighthouses.begin(); it != msg->lighthouses.end(); it++) {
-    if (lighthouses_.find(it->serial) == lighthouses_.end())
-      return;
-    Lighthouse & lighthouse = lighthouses_[it->serial];
-    for (size_t i = 0; i < it->motors.size() && i < NUM_MOTORS; i++) {
-      lighthouse.params[i][CAL_PHASE] = it->motors[i].phase;
-      lighthouse.params[i][CAL_TILT] = it->motors[i].tilt;
-      lighthouse.params[i][CAL_GIB_PHASE] = it->motors[i].gibphase;
-      lighthouse.params[i][CAL_GIB_MAG] = it->motors[i].gibmag;
-      lighthouse.params[i][CAL_CURVE] = it->motors[i].curve;
-    }
-    if (!lighthouse.ready)
-      ROS_INFO_STREAM("Received data from lighthouse " << it->serial);
-    lighthouse.ready = true;
-  }
-}
-
-void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg) {
-  // Iterate over the trackers in this message
-  std::vector<deepdive_ros::Tracker>::const_iterator it;
-  for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
-    if (trackers_.find(it->serial) == trackers_.end())
-      return;
-    // Convert to an angle-axis representation
-    Eigen::Quaterniond q(
-      it->head_transform.rotation.w,
-      it->head_transform.rotation.x,
-      it->head_transform.rotation.y,
-      it->head_transform.rotation.z);
-    Eigen::AngleAxisd aa(q);
-    Eigen::Affine3d tTh;
-    tTh.linear() = q.toRotationMatrix();
-    tTh.translation() = Eigen::Vector3d(
-      it->head_transform.translation.x,
-      it->head_transform.translation.y,
-      it->head_transform.translation.z);
-    // Modify the tracker
-    Tracker & tracker = trackers_[it->serial];
-    tracker.tTh[0] = tTh.translation()[0];
-    tracker.tTh[1] = tTh.translation()[1];
-    tracker.tTh[2] = tTh.translation()[2];
-    tracker.tTh[3] = aa.angle() * aa.axis()[0];
-    tracker.tTh[4] = aa.angle() * aa.axis()[1];
-    tracker.tTh[5] = aa.angle() * aa.axis()[2];
-    for (size_t i = 0; i < it->sensors.size() &&  i < NUM_SENSORS; i++) {
-      tracker.sensors[6*i+0] = it->sensors[i].position.x;
-      tracker.sensors[6*i+1] = it->sensors[i].position.y;
-      tracker.sensors[6*i+2] = it->sensors[i].position.z;
-      tracker.sensors[6*i+3] = it->sensors[i].normal.x;
-      tracker.sensors[6*i+4] = it->sensors[i].normal.y;
-      tracker.sensors[6*i+5] = it->sensors[i].normal.z;
-    }
-    // Invert the transformation retain frame hierarchy in TF2
-    Eigen::Affine3d hTt = tTh.inverse();
-    q = Eigen::Quaterniond(hTt.linear());
-    // Add the transforms
-    geometry_msgs::TransformStamped tfs;
-    tfs.header.frame_id = it->serial;
-    tfs.child_frame_id = it->serial + "/light";
-    tfs.transform.translation.x = hTt.translation()[0];
-    tfs.transform.translation.y = hTt.translation()[1];
-    tfs.transform.translation.z = hTt.translation()[2];
-    tfs.transform.rotation.w = q.w();
-    tfs.transform.rotation.x = q.x();
-    tfs.transform.rotation.y = q.y();
-    tfs.transform.rotation.z = q.z();
-    SendStaticTransform(tfs);
-    tfs.header.frame_id = it->serial + "/light";
-    tfs.child_frame_id = it->serial + "/imu";
-    tfs.transform = it->imu_transform;
-    SendStaticTransform(tfs);
-    // Print update
-    ROS_INFO_STREAM("Received data from tracker " << it->serial);
-    tracker.ready = true;
-  }
-  // Tracker callback triggers an update of all sensor locations and static
-  // frame transforms rtelating the head, light and body frames
-  if (visualize_) {
-    visualization_msgs::MarkerArray msg;
-    TrackerMap::iterator jt;
-    size_t n = 0;
-    for (jt = trackers_.begin(); jt != trackers_.end(); jt++, n++)  {
-      for (uint16_t i = 0; i < NUM_SENSORS; i++) {
-        // All this code just to convert a normal to a quaternion
-        Eigen::Vector3d vfwd(jt->second.sensors[6*i+3],
-          jt->second.sensors[6*i+4], jt->second.sensors[6*i+5]);
-        if (vfwd.norm() > 0) {
-          Eigen::Vector3d vdown(0.0, 0.0, 1.0);
-          Eigen::Vector3d vright = vdown.cross(vfwd);
-          vfwd = vfwd.normalized();
-          vright = vright.normalized();
-          vdown = vdown.normalized();
-          Eigen::Matrix3d dcm;
-          dcm << vfwd.x(), vright.x(), vdown.x(),
-                 vfwd.y(), vright.y(), vdown.y(),
-                 vfwd.z(), vright.z(), vdown.z();
-          Eigen::Quaterniond q(dcm);
-          // Now plot an arrow representing the normal
-          static visualization_msgs::Marker marker;
-          marker.header.frame_id = jt->first + "/light";
-          marker.header.stamp = ros::Time::now();
-          marker.ns = "sensors";
-          marker.id = NUM_SENSORS * n + i;
-          marker.type = visualization_msgs::Marker::ARROW;
-          marker.action = visualization_msgs::Marker::ADD;
-          marker.pose.position.x = jt->second.sensors[6*i+0];
-          marker.pose.position.y = jt->second.sensors[6*i+1];
-          marker.pose.position.z = jt->second.sensors[6*i+2];
-          marker.pose.orientation.w = q.w();
-          marker.pose.orientation.x = q.x();
-          marker.pose.orientation.y = q.y();
-          marker.pose.orientation.z = q.z();
-          marker.scale.x = 0.010;
-          marker.scale.y = 0.001;
-          marker.scale.z = 0.001;
-          marker.color.a = 1.0;
-          marker.color.r = 1.0;
-          marker.color.g = 0.0;
-          marker.color.b = 0.0;
-          msg.markers.push_back(marker);
-        }
-      }
-    }
-    pub_sensors_.publish(msg);
-  }
-}
-
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   // Reset the timer use din offline mode to determine the end of experiment
   timer_.stop();
@@ -763,7 +620,6 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   if (data.pulses.size() < thresh_count_)
     return; 
   // Add the data
-  ROS_INFO_THROTTLE(1, "Found a measurement");
   measurements_[ros::Time::now()].light = data;
 }
 
@@ -775,7 +631,6 @@ void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
   for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
     if (it->header.frame_id == frame_parent_ &&
         it->child_frame_id == frame_child_) {
-      ROS_INFO_THROTTLE(1, "Found a correction");
       corrections_[ros::Time::now()] = *it;
     }
   }
@@ -902,7 +757,7 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get the visualize parameter.");
 
   // Get the parent information
- std::vector<std::string> lighthouses;
+  std::vector<std::string> lighthouses;
   if (!nh.getParam("lighthouses", lighthouses))
     ROS_FATAL("Failed to get the lighthouse list.");
   std::vector<std::string>::iterator it;
@@ -963,15 +818,27 @@ int main(int argc, char **argv) {
     trackers_[serial].ready = false;
   }
 
+  // If reading the configuration file results in inserting the correct
+  // number of static transforms into the problem, then we can publish
+  // the solution for use by other entities in the system.
+  if (ReadConfig(calfile_, lighthouses_, trackers_)) {
+    ROS_INFO("Read transforms from calibration");
+  } else {
+    ROS_INFO("Could not read calibration file");
+  }
+  Publish();
+
   // Subscribe to tracker and lighthouse updates
-  ros::Subscriber sub_tracker  =
-    nh.subscribe("/trackers", 1000, TrackerCallback);
-  ros::Subscriber sub_lighthouse =
-    nh.subscribe("/lighthouses", 1000, LighthouseCallback);
+  ros::Subscriber sub_tracker  = 
+    nh.subscribe<deepdive_ros::Trackers>("/trackers", 1, std::bind(
+      TrackerCallback, std::placeholders::_1, std::ref(trackers_)));
+  ros::Subscriber sub_lighthouse = 
+    nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1, std::bind(
+      LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_)));
   ros::Subscriber sub_light =
-    nh.subscribe("/light", 1000, LightCallback);
+    nh.subscribe("/light", 1, LightCallback);
   ros::Subscriber sub_corrections =
-    nh.subscribe("/tf", 1000, CorrectionCallback);
+    nh.subscribe("/tf", 1, CorrectionCallback);
   ros::ServiceServer service =
     nh.advertiseService("/trigger", TriggerCallback);
 
@@ -985,16 +852,6 @@ int main(int argc, char **argv) {
 
   // Setup a timer to automatically trigger solution on end of experiment
   timer_ = nh.createTimer(ros::Duration(1.0), TimerCallback, true, false);
-
-  // If reading the configuration file results in inserting the correct
-  // number of static transforms into the problem, then we can publish
-  // the solution for use by other entities in the system.
-  if (ReadConfig(calfile_, lighthouses_, trackers_)) {
-    ROS_INFO("Read transforms from calibration");
-  } else {
-    ROS_INFO("Could not read calibration file");
-  }
-  Publish();
 
   // Block until safe shutdown
   ros::spin();
