@@ -17,11 +17,12 @@
 
 # GENERAL OPTIONS
 
-# Parent frame is the "world" frame, and child frame is typically "body",
-# but these may vary if you are tracking multiple rigid bodies
+# Parent frame is the "world" frame, and child frame is typically "truth",
+# and estimate is usally "body"
 frames:
   parent:           "world"
-  child:            "body"
+  child:            "truth"
+  estimate:         "body"
 
 # Thresholds used to reject measurements
 thresholds:

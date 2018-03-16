@@ -47,7 +47,8 @@ CorrectionMap corrections_;
 // Global strings
 std::string calfile_ = "deepdive.tf2";
 std::string frame_parent_ = "world";
-std::string frame_child_ = "body";
+std::string frame_child_ = "truth";
+std::string frame_estimate_ = "body";
 
 // Whether to apply corrections
 bool correct_ = false;
@@ -100,7 +101,19 @@ ros::Timer timer_;
 // SOLUTION PUBLISHING
 
 void Publish() {
+  // Assume body and truth are identity so we get nice visuals
   geometry_msgs::TransformStamped tfs;
+  tfs.header.stamp = ros::Time::now();
+  tfs.header.frame_id = frame_estimate_;
+  tfs.child_frame_id = frame_child_;
+  tfs.transform.translation.x = 0.0;
+  tfs.transform.translation.y = 0.0;
+  tfs.transform.translation.z = 0.0;
+  tfs.transform.rotation.x = 0.0;
+  tfs.transform.rotation.y = 0.0;
+  tfs.transform.rotation.z = 0.0;
+  tfs.transform.rotation.w = 1.0;
+  SendStaticTransform(tfs);
   // Publish lighthouse positions
   LighthouseMap::iterator it;
   for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
@@ -630,7 +643,7 @@ void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
   std::vector<geometry_msgs::TransformStamped>::const_iterator it;
   for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
     if (it->header.frame_id == frame_parent_ &&
-        it->child_frame_id == frame_child_) {
+        it->child_frame_id == frame_estimate_) {
       corrections_[ros::Time::now()] = *it;
     }
   }
@@ -667,6 +680,7 @@ void TimerCallback(ros::TimerEvent const& event) {
   TriggerCallback(req, res);
 }
 
+
 // MAIN ENTRY POINT
 
 int main(int argc, char **argv) {
@@ -693,6 +707,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get frames/parent parameter.");
   if (!nh.getParam("frames/child", frame_child_))
     ROS_FATAL("Failed to get frames/child parameter.");  
+  if (!nh.getParam("frames/estimate", frame_estimate_))
+    ROS_FATAL("Failed to get frames/estimate parameter.");  
 
   // Get the pose graph resolution
   if (!nh.getParam("resolution", resolution_))
@@ -743,6 +759,7 @@ int main(int argc, char **argv) {
   // Define the ceres problem
   ceres::Solver::Options options;
   options_.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+  options_.function_tolerance = 1e-12;
   if (!nh.getParam("solver/max_time", options_.max_solver_time_in_seconds))
     ROS_FATAL("Failed to get the solver/max_time parameter.");
   if (!nh.getParam("solver/max_iterations", options_.max_num_iterations))
@@ -830,15 +847,15 @@ int main(int argc, char **argv) {
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  = 
-    nh.subscribe<deepdive_ros::Trackers>("/trackers", 1, std::bind(
+    nh.subscribe<deepdive_ros::Trackers>("/trackers", 1000, std::bind(
       TrackerCallback, std::placeholders::_1, std::ref(trackers_)));
   ros::Subscriber sub_lighthouse = 
-    nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1, std::bind(
+    nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1000, std::bind(
       LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_)));
   ros::Subscriber sub_light =
-    nh.subscribe("/light", 1, LightCallback);
+    nh.subscribe("/light", 1000, LightCallback);
   ros::Subscriber sub_corrections =
-    nh.subscribe("/tf", 1, CorrectionCallback);
+    nh.subscribe("/tf", 1000, CorrectionCallback);
   ros::ServiceServer service =
     nh.advertiseService("/trigger", TriggerCallback);
 

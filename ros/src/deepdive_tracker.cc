@@ -199,10 +199,10 @@ namespace UKF {
 
 // GLOBAL DATA STRUCTURES
 
-static LighthouseMap lighthouses_;          // List of lighthouses
-static TrackerMap trackers_;                // List of trackers
-static Context context_;                    // Observation context
-static TrackingFilter filter_;              // Tracking filter
+LighthouseMap lighthouses_;          // List of lighthouses
+TrackerMap trackers_;                // List of trackers
+Context context_;                    // Observation context
+TrackingFilter filter_;              // Tracking filter
 
 // UTILITY FUNCTIONS
 
@@ -583,10 +583,12 @@ int main(int argc, char **argv) {
   }
 
   // Subscribe to the motion and light callbacks
-  ros::Subscriber sub_lighthouse  =
-    nh.subscribe("/lighthouses", 1000, LighthouseCallback);
-  ros::Subscriber sub_tracker  =
-    nh.subscribe("/trackers", 1000, TrackerCallback);
+  ros::Subscriber sub_tracker  = 
+    nh.subscribe<deepdive_ros::Trackers>("/trackers", 1000, std::bind(
+      TrackerCallback, std::placeholders::_1, std::ref(trackers_)));
+  ros::Subscriber sub_lighthouse = 
+    nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1000, std::bind(
+      LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_)));
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
   ros::Subscriber sub_imu =
