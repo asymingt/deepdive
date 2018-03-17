@@ -680,6 +680,63 @@ void TimerCallback(ros::TimerEvent const& event) {
   TriggerCallback(req, res);
 }
 
+// Called when a new lighthouse appears
+void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
+  ROS_INFO_STREAM("Found lighthouse " << lighthouse->first);
+}
+
+// Called when a new tracker appears
+void NewTrackerCallback(TrackerMap::iterator tracker) {
+  ROS_INFO_STREAM("Found tracker " << tracker->first);
+  if (visualize_) {
+    visualization_msgs::MarkerArray msg;
+    std::map<std::string, Tracker>::iterator jt;
+    size_t n = 0;
+    for (jt = trackers_.begin(); jt != trackers_.end(); jt++, n++)  {
+      for (uint16_t i = 0; i < NUM_SENSORS; i++) {
+        // All this code just to convert a normal to a quaternion
+        Eigen::Vector3d vfwd(jt->second.sensors[6*i+3],
+          jt->second.sensors[6*i+4], jt->second.sensors[6*i+5]);
+        if (vfwd.norm() > 0) {
+          Eigen::Vector3d vdown(0.0, 0.0, 1.0);
+          Eigen::Vector3d vright = vdown.cross(vfwd);
+          vfwd = vfwd.normalized();
+          vright = vright.normalized();
+          vdown = vdown.normalized();
+          Eigen::Matrix3d dcm;
+          dcm << vfwd.x(), vright.x(), vdown.x(),
+                 vfwd.y(), vright.y(), vdown.y(),
+                 vfwd.z(), vright.z(), vdown.z();
+          Eigen::Quaterniond q(dcm);
+          // Now plot an arrow representing the normal
+          static visualization_msgs::Marker marker;
+          marker.header.frame_id = jt->first + "/light";
+          marker.header.stamp = ros::Time::now();
+          marker.ns = "sensors";
+          marker.id = NUM_SENSORS * n + i;
+          marker.type = visualization_msgs::Marker::ARROW;
+          marker.action = visualization_msgs::Marker::ADD;
+          marker.pose.position.x = jt->second.sensors[6*i+0];
+          marker.pose.position.y = jt->second.sensors[6*i+1];
+          marker.pose.position.z = jt->second.sensors[6*i+2];
+          marker.pose.orientation.w = q.w();
+          marker.pose.orientation.x = q.x();
+          marker.pose.orientation.y = q.y();
+          marker.pose.orientation.z = q.z();
+          marker.scale.x = 0.010;
+          marker.scale.y = 0.001;
+          marker.scale.z = 0.001;
+          marker.color.a = 1.0;
+          marker.color.r = 1.0;
+          marker.color.g = 0.0;
+          marker.color.b = 0.0;
+          msg.markers.push_back(marker);
+        }
+      }
+    }
+    pub_sensors_.publish(msg);
+  }
+}
 
 // MAIN ENTRY POINT
 
@@ -848,10 +905,12 @@ int main(int argc, char **argv) {
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  = 
     nh.subscribe<deepdive_ros::Trackers>("/trackers", 1000, std::bind(
-      TrackerCallback, std::placeholders::_1, std::ref(trackers_)));
+      TrackerCallback, std::placeholders::_1, std::ref(trackers_),
+        NewTrackerCallback));
   ros::Subscriber sub_lighthouse = 
     nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1000, std::bind(
-      LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_)));
+      LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_),
+        NewLighthouseCallback));
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
   ros::Subscriber sub_corrections =

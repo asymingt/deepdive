@@ -66,7 +66,7 @@ struct Tracker {
   double tTh[6];
   double tTi[6];
   double sensors[NUM_SENSORS*6];
-  double errors[NUM_ERRORS*3];
+  double errors[NUM_ERRORS][3];
   bool ready;
 };
 typedef std::map<std::string, Tracker> TrackerMap;
@@ -193,7 +193,7 @@ bool WriteConfig(std::string const& calfile,
 // REUSABLE CALLS
 
 void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg,
-  LighthouseMap & lighthouses) {
+  LighthouseMap & lighthouses, std::function<void(LighthouseMap::iterator)> cb) {
   std::vector<deepdive_ros::Lighthouse>::const_iterator it;
   for (it = msg->lighthouses.begin(); it != msg->lighthouses.end(); it++) {
     LighthouseMap::iterator lighthouse = lighthouses.find(it->serial);
@@ -207,19 +207,33 @@ void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg,
       lighthouse->second.params[i][PARAM_CURVE] = it->motors[i].curve;
     }
     if (!lighthouse->second.ready)
-      ROS_INFO_STREAM("RX data from lighthouse " << it->serial);
+      cb(lighthouse);
     lighthouse->second.ready = true;
   }
 }
 
 void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
-  TrackerMap & trackers) {
+  TrackerMap & trackers, std::function<void(TrackerMap::iterator)> cb) {
   // Iterate over the trackers in this message
   std::vector<deepdive_ros::Tracker>::const_iterator it;
   for (it = msg->trackers.begin(); it != msg->trackers.end(); it++) {
     TrackerMap::iterator tracker = trackers.find(it->serial);
     if (tracker == trackers.end())
       return;
+    // Copy over the initial IMU errors
+    tracker->second.errors[ERROR_GYR_BIAS][0] = it->gyr_bias.x;
+    tracker->second.errors[ERROR_GYR_BIAS][1] = it->gyr_bias.y;
+    tracker->second.errors[ERROR_GYR_BIAS][2] = it->gyr_bias.z;
+    tracker->second.errors[ERROR_GYR_SCALE][0] = it->gyr_scale.x;
+    tracker->second.errors[ERROR_GYR_SCALE][1] = it->gyr_scale.y;
+    tracker->second.errors[ERROR_GYR_SCALE][2] = it->gyr_scale.z;
+    tracker->second.errors[ERROR_ACC_BIAS][0] = it->acc_bias.x;
+    tracker->second.errors[ERROR_ACC_BIAS][1] = it->acc_bias.y;
+    tracker->second.errors[ERROR_ACC_BIAS][2] = it->acc_bias.z;
+    tracker->second.errors[ERROR_ACC_SCALE][0] = it->acc_scale.x;
+    tracker->second.errors[ERROR_ACC_SCALE][1] = it->acc_scale.y;
+    tracker->second.errors[ERROR_ACC_SCALE][2] = it->acc_scale.z;
+    // Add the sensor locations and normals
     for (size_t i = 0; i < it->sensors.size() &&  i < NUM_SENSORS; i++) {
       tracker->second.sensors[6*i+0] = it->sensors[i].position.x;
       tracker->second.sensors[6*i+1] = it->sensors[i].position.y;
@@ -292,9 +306,8 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
       tfs.transform = it->imu_transform;
       SendStaticTransform(tfs);
     }
-    //  We are now ready
     if (!tracker->second.ready)
-      ROS_INFO_STREAM("RX data from tracker " << it->serial);
+      cb(tracker);
     tracker->second.ready = true;
   }
 }
