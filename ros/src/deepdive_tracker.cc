@@ -450,6 +450,19 @@ void TimerCallback(ros::TimerEvent const& info) {
 // Called when a new lighthouse appears
 void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
   ROS_INFO_STREAM("Found lighthouse " << lighthouse->first);
+  ///////////////////////
+  // Cache a transform //
+  ///////////////////////
+  Eigen::Vector3d v;
+  Eigen::Affine3d wTl;
+  // head -> body
+  v = Eigen::Vector3d(lighthouse->second.wTl[3],
+    lighthouse->second.wTl[4], lighthouse->second.wTl[5]);
+  wTl.translation() = Eigen::Vector3d(lighthouse->second.wTl[0],
+    lighthouse->second.wTl[1], lighthouse->second.wTl[2]);
+  wTl.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  // Cache a transform
+  lTw_[lighthouse->first] = wTl.inverse();
 }
 
 // Called when a new tracker appears
@@ -478,6 +491,32 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
   error.process_noise_root_covariance = Error::CovarianceMatrix::Zero();
   error.process_noise_root_covariance.diagonal() <<
     imu_proc_ab_, imu_proc_as_, imu_proc_gb_, imu_proc_gs_;
+  ///////////////////////
+  // Cache a transform //
+  ///////////////////////
+  Eigen::Vector3d v;
+  Eigen::Affine3d bTh, tTh, tTi;
+  // head -> body
+  v = Eigen::Vector3d(
+    tracker->second.bTh[3], tracker->second.bTh[4], tracker->second.bTh[5]);
+  bTh.translation() = Eigen::Vector3d(
+    tracker->second.bTh[0], tracker->second.bTh[1], tracker->second.bTh[2]);
+  bTh.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  // head -> light
+  v = Eigen::Vector3d(
+    tracker->second.tTh[3], tracker->second.tTh[4], tracker->second.tTh[5]);
+  tTh.translation() = Eigen::Vector3d(
+    tracker->second.tTh[0], tracker->second.tTh[1], tracker->second.tTh[2]);
+  tTh.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  // imu -> light
+  v = Eigen::Vector3d(
+    tracker->second.tTi[3], tracker->second.tTi[4], tracker->second.tTi[5]);
+  tTi.translation() =Eigen::Vector3d(
+    tracker->second.tTi[0], tracker->second.tTi[1], tracker->second.tTi[2]);
+  tTi.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  // Global cache
+  bTt_[tracker->first] = bTh * tTh.inverse();
+  bTi_[tracker->first] = bTh * tTh.inverse() * tTi;
 }
 
 // MAIN ENTRY POINT OF APPLICATION
