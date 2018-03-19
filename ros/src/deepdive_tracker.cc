@@ -94,6 +94,9 @@ using TrackingFilter =
 
 // For IMU parameter estimation
 typedef std::map<std::string, ErrorFilter> ErrorMap;
+typedef std::map<std::string, Eigen::Affine3d> TransformMap;
+
+
 
 // GLOBAL DATA STRUCTURES
 
@@ -130,12 +133,17 @@ Eigen::Vector3d sensor_;             // Current sensor
 Eigen::Vector3d obs_cov_acc_;        // Measurement covariance: Accelerometer
 Eigen::Vector3d obs_cov_gyr_;        // Measurement covariance: Gyroscope
 double obs_cov_ang_;                 // Measurement covariance: Angle
-Eigen::Affine3d lTw_;                // Current world -> lighthouse transform
-Eigen::Affine3d bTt_;                // Current light -> body transform
-Eigen::Affine3d bTi_;                // Current imu -> body transform
 double * params_;                    // Parameters
 uint8_t axis_;                       // Current axis
 
+// Intermediary data
+std::string lighthouse_;             // Current lighthouse
+std::string tracker_;                // Current tracker
+TransformMap lTw_;                   // world -> lighthouse
+TransformMap bTi;                    // imu -> body
+TransformMap bTt;                    // tracking -> body
+uint16_t sensor;                     // Current sensor
+uint8_t axis_;                       // Current axis
 
 // TRACKING FILTER
 
@@ -295,6 +303,9 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   }
   // Set the measurement axis
   axis_ = msg->axis;
+  // Update the transforms
+  Eigen::Affine3d wTl, tTh, bTh, tTi;
+
   // Clean up the measurments
   std::vector<deepdive_ros::Pulse> data;
   for (size_t i = 0; i < msg->pulses.size(); i++) {
@@ -357,7 +368,13 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
     msg->angular_velocity.x,
     msg->angular_velocity.y,
     msg->angular_velocity.z);
-  // TODO(Andrew) inject the transforms
+  // Update the transforms uses
+  Eigen::Affine3d wTl, tTh, bTh, tTi;
+
+
+  lTw_ = lighthouse->wTl.inverse();                             // world -> lighthouse
+  bTi_ = tracker->bTh * tracker->tTh.inverse() * tracker->tTi;  // imu -> body
+  bTt_ = tracker->bTh * tracker->tTh.inverse();                 // light -> body
   // Create a measurement
   Observation obs;
   obs.set_field<Accelerometer>(acc);
