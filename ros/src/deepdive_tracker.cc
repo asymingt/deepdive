@@ -96,8 +96,6 @@ using TrackingFilter =
 typedef std::map<std::string, ErrorFilter> ErrorMap;
 typedef std::map<std::string, Eigen::Affine3d> TransformMap;
 
-
-
 // GLOBAL DATA STRUCTURES
 
 ErrorMap errors_;                    // Errors for each tracker
@@ -129,21 +127,18 @@ Eigen::Vector3d imu_proc_gs_;        // Process noise: Gyro scale
 // Default measurement errors
 bool correct_ = false;               // Whether to correct light parameters
 Eigen::Vector3d gravity_;            // Gravity
-Eigen::Vector3d sensor_;             // Current sensor
 Eigen::Vector3d obs_cov_acc_;        // Measurement covariance: Accelerometer
 Eigen::Vector3d obs_cov_gyr_;        // Measurement covariance: Gyroscope
 double obs_cov_ang_;                 // Measurement covariance: Angle
-double * params_;                    // Parameters
-uint8_t axis_;                       // Current axis
 
 // Intermediary data
-std::string lighthouse_;             // Current lighthouse
-std::string tracker_;                // Current tracker
-TransformMap lTw_;                   // world -> lighthouse
-TransformMap bTi;                    // imu -> body
-TransformMap bTt;                    // tracking -> body
-uint16_t sensor;                     // Current sensor
-uint8_t axis_;                       // Current axis
+TransformMap lTw_;                      // ALL: world -> lighthouse
+TransformMap bTi_;                      // ALL: imu -> body
+TransformMap bTt_;                      // ALL: tracking -> body
+std::string lighthouse_;                // Active lighthouse
+std::string tracker_;                   // Active tracker
+Eigen::Vector3d sensor_;                // Active sensor
+uint8_t axis_;                          // Active axis
 
 // TRACKING FILTER
 
@@ -180,9 +175,9 @@ namespace UKF {
   Observation::expected_measurement<Error, Accelerometer, State>(
     Error const& errors, State const& state) {
     UKF::Vector<3> const& w = state.get_field<Omega>();
-    UKF::Vector<3> const& p = bTi_.translation();
+    UKF::Vector<3> const& p = bTi_[tracker_].translation();
     return errors.get_field<AccelerometerScale>().cwiseProduct(
-      bTi_.linear().inverse() * w.cross(w.cross(p))
+      bTi_[tracker_].linear().inverse() * w.cross(w.cross(p))
         + state.get_field<Acceleration>()
         + errors.get_field<AccelerometerBias>()
         + state.get_field<Attitude>() * gravity_);
@@ -192,7 +187,7 @@ namespace UKF {
   Observation::expected_measurement<Error, Gyroscope, State>(
     Error const& errors, State const& state) {
     return errors.get_field<GyroscopeScale>().cwiseProduct(
-      bTi_.linear().inverse() * state.get_field<Omega>()
+      bTi_[tracker_].linear().inverse() * state.get_field<Omega>()
         + errors.get_field<GyroscopeBias>());
   }
 
@@ -202,17 +197,18 @@ namespace UKF {
     Eigen::Affine3d wTb;
     wTb.translation() = state.get_field<Position>();
     wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = lTw_ * wTb * bTt_ * sensor_;
+    UKF::Vector<3> x = lTw_[lighthouse_] * wTb * bTt_[tracker_] * sensor_;
     UKF::Vector<2> angles;
     angles[0] = std::atan2(x[0], x[2]);
     angles[1] = std::atan2(x[1], x[2]);
     uint8_t const& a = axis_;
     if (correct_) {
-      angles[a] -= params_[PARAM_PHASE];
-      angles[a] -= params_[PARAM_TILT] * angles[1-a];
-      angles[a] -= params_[PARAM_CURVE] * angles[1-a] * angles[1-a];
-      angles[a] -= params_[PARAM_GIB_MAG] *
-        std::cos(angles[1-a] + params_[PARAM_GIB_PHASE]);
+      double const * const params = lighthouses_[lighthouse_].params[a];
+      angles[a] -= params[PARAM_PHASE];
+      angles[a] -= params[PARAM_TILT] * angles[1-a];
+      angles[a] -= params[PARAM_CURVE] * angles[1-a] * angles[1-a];
+      angles[a] -= params[PARAM_GIB_MAG] *
+        std::cos(angles[1-a] + params[PARAM_GIB_PHASE]);
     }
     return angles[a];
   }
@@ -226,9 +222,9 @@ namespace UKF {
   Observation::expected_measurement<State, Accelerometer, Error>(
     State const& state, Error const& errors) {
     UKF::Vector<3> const& w = state.get_field<Omega>();
-    UKF::Vector<3> const& p = bTi_.translation();
+    UKF::Vector<3> const& p = bTi_[tracker_].translation();
     return errors.get_field<AccelerometerScale>().cwiseProduct(
-      bTi_.linear().inverse() * w.cross(w.cross(p))
+      bTi_[tracker_].linear().inverse() * w.cross(w.cross(p))
         + state.get_field<Acceleration>()
         + errors.get_field<AccelerometerBias>()
         + state.get_field<Attitude>() * gravity_);
@@ -238,7 +234,7 @@ namespace UKF {
   Observation::expected_measurement<State, Gyroscope, Error>(
     State const& state, Error const& errors) {
     return errors.get_field<GyroscopeScale>().cwiseProduct(
-      bTi_.linear().inverse() * state.get_field<Omega>()
+      bTi_[tracker_].linear().inverse() * state.get_field<Omega>()
         + errors.get_field<GyroscopeBias>());
   }
 
@@ -248,17 +244,18 @@ namespace UKF {
     Eigen::Affine3d wTb;
     wTb.translation() = state.get_field<Position>();
     wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = lTw_ * wTb * bTt_ * sensor_;
+    UKF::Vector<3> x = lTw_[lighthouse_] * wTb * bTt_[tracker_] * sensor_;
     UKF::Vector<2> angles;
     angles[0] = std::atan2(x[0], x[2]);
     angles[1] = std::atan2(x[1], x[2]);
     uint8_t const& a = axis_;
     if (correct_) {
-      angles[a] -= params_[PARAM_PHASE];
-      angles[a] -= params_[PARAM_TILT] * angles[1-a];
-      angles[a] -= params_[PARAM_CURVE] * angles[1-a] * angles[1-a];
-      angles[a] -= params_[PARAM_GIB_MAG] *
-        std::cos(angles[1-a] + params_[PARAM_GIB_PHASE]);
+      double const * const params = lighthouses_[lighthouse_].params[a];
+      angles[a] -= params[PARAM_PHASE];
+      angles[a] -= params[PARAM_TILT] * angles[1-a];
+      angles[a] -= params[PARAM_CURVE] * angles[1-a] * angles[1-a];
+      angles[a] -= params[PARAM_GIB_MAG] *
+        std::cos(angles[1-a] + params[PARAM_GIB_PHASE]);
     }
     return angles[a];
   }
@@ -283,28 +280,27 @@ double Delta(ros::Time const& now) {
 // - Dual lighthouses in b/A or b/c modes : 120Hz (30Hz per axis)
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   double dt = Delta(ros::Time::now());
+
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
   if (tracker == trackers_.end() || !tracker->second.ready) {
     ROS_INFO_STREAM_THROTTLE(1, "Tracker not found or ready");
     return;
   }
+
   // Check that we are recording and that the tracker/lighthouse is ready
   LighthouseMap::iterator lighthouse = lighthouses_.find(msg->lighthouse);
   if (lighthouse == lighthouses_.end() || !lighthouse->second.ready) {
     ROS_INFO_STREAM_THROTTLE(1, "Lighthouse not found or ready");
     return;
   }
+
   // Make sure we have a filter setup for this
   ErrorMap::iterator error = errors_.find(msg->header.frame_id);
   if (error == errors_.end()) {
     ROS_INFO_STREAM_THROTTLE(1, "Tracker error filter not initialized");
     return;
   }
-  // Set the measurement axis
-  axis_ = msg->axis;
-  // Update the transforms
-  Eigen::Affine3d wTl, tTh, bTh, tTi;
 
   // Clean up the measurments
   std::vector<deepdive_ros::Pulse> data;
@@ -326,17 +322,34 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   }
   if (data.size() < thresh_count_)
     ROS_INFO_STREAM_THROTTLE(1, "Not enough data so skipping bundle.");
+
+  // Set the context correctly
+  tracker_ = msg->header.frame_id;
+  lighthouse_ = msg->lighthouse;
+  axis_ = msg->axis;
+
   // Correct the error filter
   error->second.a_priori_step();
   for (uint8_t i = 0; i < data.size(); i++) {
+    // Set the context correctly
+    sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
+    sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];
+    sensor_[2] = tracker->second.sensors[6 * data[i].sensor + 2];
+    // Create the observation
     Observation obs;
     obs.set_field<Angle>(data[i].angle);
     error->second.innovation_step(obs, filter_.state);
   }
   error->second.a_posteriori_step();
+
   // Correct the tracking filter
   filter_.a_priori_step(dt);
   for (uint8_t i = 0; i < data.size(); i++) {
+    // Set the context correctly
+    sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
+    sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];
+    sensor_[2] = tracker->second.sensors[6 * data[i].sensor + 2];
+    // Create the observation
     Observation obs;
     obs.set_field<Angle>(data[i].angle);
     filter_.innovation_step(obs, error->second.state);
@@ -347,18 +360,21 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 // This will be called at approximately 250Hz
 void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   double dt = Delta(ros::Time::now());
+
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
   if (tracker == trackers_.end() || !tracker->second.ready) {
     ROS_INFO_STREAM_THROTTLE(1, "Tracker not found or ready");
     return;
   }
+
   // Make sure we have a filter setup for this
   ErrorMap::iterator error = errors_.find(msg->header.frame_id);
   if (error == errors_.end()) {
     ROS_INFO_STREAM_THROTTLE(1, "Tracker error filter not initialized");
     return;
   }
+
   // Get the measurements
   Eigen::Vector3d acc(
     msg->linear_acceleration.x,
@@ -368,21 +384,20 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
     msg->angular_velocity.x,
     msg->angular_velocity.y,
     msg->angular_velocity.z);
-  // Update the transforms uses
-  Eigen::Affine3d wTl, tTh, bTh, tTi;
 
+  // Set the context correctly
+  tracker_ = msg->header.frame_id;
 
-  lTw_ = lighthouse->wTl.inverse();                             // world -> lighthouse
-  bTi_ = tracker->bTh * tracker->tTh.inverse() * tracker->tTi;  // imu -> body
-  bTt_ = tracker->bTh * tracker->tTh.inverse();                 // light -> body
   // Create a measurement
   Observation obs;
   obs.set_field<Accelerometer>(acc);
   obs.set_field<Gyroscope>(gyr);
+
   // Propagate the IMU error filter using the tracking filter state
   error->second.a_priori_step();
   error->second.innovation_step(obs, filter_.state);
   error->second.a_posteriori_step(); 
+
   // Propagate the filter
   filter_.a_priori_step(dt);
   filter_.innovation_step(obs, error->second.state);
