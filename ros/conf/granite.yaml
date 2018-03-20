@@ -99,7 +99,7 @@ topics:
 # For the tracking filter
 
 # Fixed tracking rate
-rate:               62.5
+rate:               10.0
 
 # Gravity vector in parent frame
 gravity:            [0.0, 0.0, -9.80665]

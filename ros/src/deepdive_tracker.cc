@@ -5,6 +5,8 @@
 
 // ROS includes
 #include <ros/ros.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/static_transform_broadcaster.h>
 
 // General messages
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
@@ -75,8 +77,12 @@ using Error = UKF::StateVector<
 >;
 
 // For parameter estimation
-using ErrorFilter =
-  UKF::SquareRootParameterEstimationCore<Error, Observation>;
+using ErrorFilter = UKF::SquareRootParameterEstimationCore<
+  Error,
+  Observation
+>;
+
+// TRACKING FILTER
 
 // State vector
 using State = UKF::StateVector<
@@ -89,8 +95,11 @@ using State = UKF::StateVector<
 >;
 
 // For tracking
-using TrackingFilter =
-  UKF::SquareRootCore<State, Observation, UKF::IntegratorRK4>;
+using TrackingFilter = UKF::SquareRootCore<
+  State,
+  Observation,
+  UKF::IntegratorHeun
+>;
 
 // For IMU parameter estimation
 typedef std::map<std::string, ErrorFilter> ErrorMap;
@@ -104,7 +113,7 @@ TrackerMap trackers_;                // List of trackers
 TrackingFilter filter_;              // Tracking filter
 std::string frame_parent_;           // Parent frame, eg "world"
 std::string frame_child_;            // Child frame, eg "truth"
-double rate_;                        // Desired tracking rate
+double rate_ = 10.0;                // Desired tracking rate in Hz
 int thresh_count_ = 4;               // Min num measurements required per bundle
 double thresh_angle_ = 60.0;         // Angle threshold in degrees
 double thresh_duration_ = 1.0;       // Duration threshold in micorseconds
@@ -266,13 +275,13 @@ namespace UKF {
 
 // UTILITY FUNCTIONS
 
-double Delta(ros::Time const& now) {
-  static ros::Time last = ros::Time::now();
-  double dt = (now - last).toSec();
-  last = now;
-  if (dt > rate_ * 2)
-    ROS_WARN_STREAM_THROTTLE(1, "Made dt call at > 2x target period");
-  return (dt > 0 ? dt : rate_);
+bool Delta(double & dt) {
+  static ros::Time last = ros::Time::now(), now;
+  now = ros::Time::now();
+  dt = (now - last).toSec();
+  if (dt > 0)
+    last = now;
+  return (dt > 0 && dt < 1.0);
 }
 
 // CALLBACKS
@@ -281,7 +290,9 @@ double Delta(ros::Time const& now) {
 // - Single lighthouse in 'A' mode : 120Hz (60Hz per axis)
 // - Dual lighthouses in b/A or b/c modes : 120Hz (30Hz per axis)
 void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
-  double dt = Delta(ros::Time::now());
+  static double dt;
+  if (!initialized_ || !Delta(dt))
+    return;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -361,7 +372,9 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 
 // This will be called at approximately 250Hz
 void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
-  double dt = Delta(ros::Time::now());
+  static double dt;
+  if (!initialized_ || !Delta(dt))
+    return;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -400,6 +413,16 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   error->second.innovation_step(obs, filter_.state);
   error->second.a_posteriori_step(); 
 
+  /*
+  // Clip parameters to physically reasonable values. 
+  UKF::Vector<3> temp;
+  temp = ahrs_errors.state.get_field<AccelerometerBias>();
+  temp[0] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[0]));
+  temp[1] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[1]));
+  temp[2] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[2]));
+  error->second.state.set_field<AccelerometerBias>(temp);
+  */
+
   // Propagate the filter
   filter_.a_priori_step(dt);
   filter_.innovation_step(obs, error->second.state);
@@ -408,18 +431,9 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 
 // This will be called back at the desired tracking rate
 void TimerCallback(ros::TimerEvent const& info) {
-  double dt = Delta(ros::Time::now());
-
-  // Only start tracking if we have initialized all trackers and lighthouses
-  if (!initialized_) {
-    TrackerMap::const_iterator it;
-    for (it = trackers_.begin(); it != trackers_.end(); it++)
-      if (!it->second.ready) return;
-    LighthouseMap::const_iterator jt;
-    for (jt = lighthouses_.begin(); jt != lighthouses_.end(); jt++)
-      if (!jt->second.ready) return;
-    initialized_ = true;
-  }
+  static double dt;
+  if (!initialized_ || !Delta(dt))
+    return;
 
   // Propagate the filter forward
   filter_.a_priori_step(dt);
@@ -440,6 +454,7 @@ void TimerCallback(ros::TimerEvent const& info) {
   tfs.transform.rotation.x = filter_.state.get_field<Attitude>().x();
   tfs.transform.rotation.y = filter_.state.get_field<Attitude>().y();
   tfs.transform.rotation.z = filter_.state.get_field<Attitude>().z();
+  ROS_INFO_STREAM(tfs);
   SendDynamicTransform(tfs);
 
   // Broadcast the pose with covariance
@@ -476,6 +491,19 @@ void TimerCallback(ros::TimerEvent const& info) {
   pub_twist_.publish(twcs);
 }
 
+void CheckIfReadyToTrack() {
+  if (!initialized_) {
+    TrackerMap::const_iterator it;
+    for (it = trackers_.begin(); it != trackers_.end(); it++)
+      if (!it->second.ready) return;
+    LighthouseMap::const_iterator jt;
+    for (jt = lighthouses_.begin(); jt != lighthouses_.end(); jt++)
+      if (!jt->second.ready) return;
+    ROS_INFO_STREAM("All trackers and lighthouses found. Tracking started.");
+    initialized_ = true;
+  }
+}
+
 // Called when a new lighthouse appears
 void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
   ROS_INFO_STREAM("Found lighthouse " << lighthouse->first);
@@ -489,9 +517,12 @@ void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
     lighthouse->second.wTl[4], lighthouse->second.wTl[5]);
   wTl.translation() = Eigen::Vector3d(lighthouse->second.wTl[0],
     lighthouse->second.wTl[1], lighthouse->second.wTl[2]);
-  wTl.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  wTl.linear() = Eigen::AngleAxisd(v.norm(),
+    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // Cache a transform
   lTw_[lighthouse->first] = wTl.inverse();
+  // Check if we have got all info from lighthouses and trackers
+  CheckIfReadyToTrack();
 }
 
 // Called when a new tracker appears
@@ -530,22 +561,27 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
     tracker->second.bTh[3], tracker->second.bTh[4], tracker->second.bTh[5]);
   bTh.translation() = Eigen::Vector3d(
     tracker->second.bTh[0], tracker->second.bTh[1], tracker->second.bTh[2]);
-  bTh.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  bTh.linear() = Eigen::AngleAxisd(v.norm(),
+    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // head -> light
   v = Eigen::Vector3d(
     tracker->second.tTh[3], tracker->second.tTh[4], tracker->second.tTh[5]);
   tTh.translation() = Eigen::Vector3d(
     tracker->second.tTh[0], tracker->second.tTh[1], tracker->second.tTh[2]);
-  tTh.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  tTh.linear() = Eigen::AngleAxisd(v.norm(),
+    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // imu -> light
   v = Eigen::Vector3d(
     tracker->second.tTi[3], tracker->second.tTi[4], tracker->second.tTi[5]);
   tTi.translation() =Eigen::Vector3d(
     tracker->second.tTi[0], tracker->second.tTi[1], tracker->second.tTi[2]);
-  tTi.linear() = Eigen::AngleAxisd(v.norm(), v.normalized()).toRotationMatrix();
+  tTi.linear() = Eigen::AngleAxisd(v.norm(),
+    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // Global cache
   bTt_[tracker->first] = bTh * tTh.inverse();
   bTi_[tracker->first] = bTh * tTh.inverse() * tTi;
+  // Check if we have got all info from lighthouses and trackers
+  CheckIfReadyToTrack();
 }
 
 // MAIN ENTRY POINT OF APPLICATION
@@ -671,8 +707,7 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get correct parameter.");
 
   // Get the tracker update rate.
-  double rate = 100;
-  if (!nh.getParam("rate", rate))
+  if (!nh.getParam("rate", rate_))
     ROS_FATAL("Failed to get rate parameter.");
 
   // Get gravity
@@ -747,11 +782,11 @@ int main(int argc, char **argv) {
   filter_.state.set_field<Acceleration>(est_acceleration);
   filter_.state.set_field<Alpha>(est_alpha);
   filter_.root_covariance = State::CovarianceMatrix::Zero();
-  filter_.root_covariance.diagonal() << cov_position, cov_attitude, cov_velocity,
-    cov_omega, cov_accel, cov_alpha;
+  filter_.root_covariance.diagonal() << cov_position, cov_attitude,
+    cov_velocity, cov_omega, cov_accel, cov_alpha;
   filter_.process_noise_root_covariance = State::CovarianceMatrix::Zero();
-  filter_.process_noise_root_covariance.diagonal() << noise_position, noise_attitude,
-    noise_velocity, noise_omega, noise_accel, noise_alpha;
+  filter_.process_noise_root_covariance.diagonal() << noise_position,
+    noise_attitude, noise_velocity, noise_omega, noise_accel, noise_alpha;
 
   // IMU error : initial estimate
   if (!GetVectorParam(nh, "imu_initial_root_cov/acc_bias", imu_cov_ab_))
@@ -814,7 +849,7 @@ int main(int argc, char **argv) {
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(
-    ros::Duration(ros::Rate(rate)), TimerCallback, false, true);
+    ros::Duration(ros::Rate(rate_)), TimerCallback, false, true);
 
   // Block until safe shutdown
   ros::spin();
