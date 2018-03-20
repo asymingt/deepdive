@@ -98,68 +98,6 @@ ros::Publisher pub_corr_;
 // Timer for managing offline
 ros::Timer timer_;
 
-// SOLUTION PUBLISHING
-
-void Publish() {
-  // Assume body and truth are identity so we get nice visuals
-  geometry_msgs::TransformStamped tfs;
-  tfs.header.stamp = ros::Time::now();
-  tfs.header.frame_id = frame_estimate_;
-  tfs.child_frame_id = frame_child_;
-  tfs.transform.translation.x = 0.0;
-  tfs.transform.translation.y = 0.0;
-  tfs.transform.translation.z = 0.0;
-  tfs.transform.rotation.x = 0.0;
-  tfs.transform.rotation.y = 0.0;
-  tfs.transform.rotation.z = 0.0;
-  tfs.transform.rotation.w = 1.0;
-  SendStaticTransform(tfs);
-  // Publish lighthouse positions
-  LighthouseMap::iterator it;
-  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
-    Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
-    Eigen::AngleAxisd aa;
-    if (v.norm() > 0) {
-      aa.angle() = v.norm();
-      aa.axis() = v.normalized();
-    }
-    Eigen::Quaterniond q(aa);
-    tfs.header.stamp = ros::Time::now();
-    tfs.header.frame_id = frame_parent_;
-    tfs.child_frame_id = it->first;
-    tfs.transform.translation.x = it->second.wTl[0];
-    tfs.transform.translation.y = it->second.wTl[1];
-    tfs.transform.translation.z = it->second.wTl[2];
-    tfs.transform.rotation.x = q.x();
-    tfs.transform.rotation.y = q.y();
-    tfs.transform.rotation.z = q.z();
-    tfs.transform.rotation.w = q.w();
-    SendStaticTransform(tfs);
-  }
-  // Publish tracker extrinsics
-  TrackerMap::iterator jt;
-  for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
-    Eigen::Vector3d v(jt->second.bTh[3], jt->second.bTh[4], jt->second.bTh[5]);
-    Eigen::AngleAxisd aa;
-    if (v.norm() > 0) {
-      aa.angle() = v.norm();
-      aa.axis() = v.normalized();
-    }
-    Eigen::Quaterniond q(aa);
-    tfs.header.stamp = ros::Time::now();
-    tfs.header.frame_id = frame_child_;
-    tfs.child_frame_id = jt->first;
-    tfs.transform.translation.x = jt->second.bTh[0];
-    tfs.transform.translation.y = jt->second.bTh[1];
-    tfs.transform.translation.z = jt->second.bTh[2];
-    tfs.transform.rotation.x = q.x();
-    tfs.transform.rotation.y = q.y();
-    tfs.transform.rotation.z = q.z();
-    tfs.transform.rotation.w = q.w();
-    SendStaticTransform(tfs);
-  }
-}
-
 // CERES SOLVER
 
 // Helper function to apply a transform b = Ra + t
@@ -542,7 +480,7 @@ bool Solve() {
       }
     }
     // Publish the new solution
-    Publish();
+    SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
     // Write the solution to a config file
     if (WriteConfig(calfile_, frame_parent_, frame_child_,
       lighthouses_, trackers_))
@@ -900,7 +838,21 @@ int main(int argc, char **argv) {
   } else {
     ROS_INFO("Could not read calibration file");
   }
-  Publish();
+  SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
+
+  // Assume body and truth are identity so we get nice visuals
+  geometry_msgs::TransformStamped tfs;
+  tfs.header.stamp = ros::Time::now();
+  tfs.header.frame_id = frame_estimate_;
+  tfs.child_frame_id = frame_child_;
+  tfs.transform.translation.x = 0.0;
+  tfs.transform.translation.y = 0.0;
+  tfs.transform.translation.z = 0.0;
+  tfs.transform.rotation.x = 0.0;
+  tfs.transform.rotation.y = 0.0;
+  tfs.transform.rotation.z = 0.0;
+  tfs.transform.rotation.w = 1.0;
+  SendStaticTransform(tfs);
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  = 

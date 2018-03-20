@@ -110,7 +110,6 @@ double thresh_angle_ = 60.0;         // Angle threshold in degrees
 double thresh_duration_ = 1.0;       // Duration threshold in micorseconds
 
 // ROS publishers
-
 ros::Publisher pub_pose_;
 ros::Publisher pub_twist_;
 
@@ -139,6 +138,9 @@ std::string lighthouse_;                // Active lighthouse
 std::string tracker_;                   // Active tracker
 Eigen::Vector3d sensor_;                // Active sensor
 uint8_t axis_;                          // Active axis
+
+// Are we initialized and ready to track
+bool initialized_ = false;
 
 // TRACKING FILTER
 
@@ -407,6 +409,18 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 // This will be called back at the desired tracking rate
 void TimerCallback(ros::TimerEvent const& info) {
   double dt = Delta(ros::Time::now());
+
+  // Only start tracking if we have initialized all trackers and lighthouses
+  if (!initialized_) {
+    TrackerMap::const_iterator it;
+    for (it = trackers_.begin(); it != trackers_.end(); it++)
+      if (!it->second.ready) return;
+    LighthouseMap::const_iterator jt;
+    for (jt = lighthouses_.begin(); jt != lighthouses_.end(); jt++)
+      if (!jt->second.ready) return;
+    initialized_ = true;
+  }
+
   // Propagate the filter forward
   filter_.a_priori_step(dt);
 
@@ -776,6 +790,13 @@ int main(int argc, char **argv) {
   } else {
     ROS_INFO("Could not read calibration file");
   }
+  SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
+
+  // Markers showing sensor positions
+  pub_pose_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>
+    (topic_pose, 0);
+  pub_twist_ = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>
+    (topic_twist, 0);
 
   // Subscribe to the motion and light callbacks
   ros::Subscriber sub_tracker  = 
@@ -790,12 +811,6 @@ int main(int argc, char **argv) {
     nh.subscribe("/light", 1000, LightCallback);
   ros::Subscriber sub_imu =
     nh.subscribe("/imu", 1000, ImuCallback);
-  
-  // Markers showing sensor positions
-  pub_pose_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>
-    (topic_pose, 0);
-  pub_twist_ = nh.advertise<geometry_msgs::TwistWithCovarianceStamped>
-    (topic_twist, 0);
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(
