@@ -844,8 +844,8 @@ int main(int argc, char **argv) {
         NewLighthouseCallback));
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
-  ros::Subscriber sub_imu =
-    nh.subscribe("/imu", 1000, ImuCallback);
+  //ros::Subscriber sub_imu =
+  //  nh.subscribe("/imu", 1000, ImuCallback);
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(

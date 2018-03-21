@@ -34,6 +34,9 @@ thresholds:
 # Publish rviz markers for the sensors
 visualize:          true
 
+# Apply light corrections broadcast over OOTX
+correct:            false
+
 # List of lighthouses to be included in tracking
 lighthouses:
   - "lighthouse_back"
@@ -60,9 +63,6 @@ tracker_stbd:
 
 # Maximum resolution (time difference) between poses in the graph
 resolution:         0.001
-
-# Apply light corrections broadcast over OOTX
-correct:            true
 
 # Lock the Z coordinate of the body-frame (force solution on Z plane)
 force2d:            true
@@ -107,45 +107,45 @@ gravity:            [0.0, 0.0, -9.80665]
 # Initial state value
 initial_estimate:
   position:         [0, 0, 0]             # Initial pose (world frame)
-  velocity:         [0, 0, 0]             # Initial velocity (world frame)
-  acceleration:     [0, 0, 0]             # Initial acceleration (world frame)
   attitude:         [0, 0, 0, 1]          # Initial attitude
+  velocity:         [0, 0, 0]             # Initial velocity (world frame)
   omega:            [0, 0, 0]             # Initial omega (body frame)
+  acceleration:     [0, 0, 0]             # Initial acceleration (world frame)
   alpha:            [0, 0, 0]             # Initial alpha (world frame)
 
 #  Initial uncertainty
 initial_root_cov:
   position:         [10, 10, 10]
-  velocity:         [1.0e-03, 1.0e-03, 1.0e-03]
-  acceleration:     [1.0e-03, 1.0e-03, 1.0e-03]
   attitude:         [10, 10, 10]
-  omega:            [1.0e-03, 1.0e-03, 1.0e-03]
-  alpha:            [1.0e-03, 1.0e-03, 1.0e-03]
+  velocity:         [1, 1, 1]
+  omega:            [1, 1, 1]
+  acceleration:     [1, 1, 1]
+  alpha:            [1, 1, 1]
 
 # Process noise
 process_noise_root_cov:
-  position:         [1.0e-08, 1.0e-08, 1.0e-08]
-  velocity:         [1.0e-06, 1.0e-06, 1.0e-06]
-  acceleration:     [1.0e-10, 1.0e-10, 1.0e-10]
-  attitude:         [1.0e-08, 1.0e-08, 1.0e-08]
-  omega:            [1.0e-06, 1.0e-06, 1.0e-06]
-  alpha:            [1.0e-06, 1.0e-06, 1.0e-06]
+  position:         [1.0e-04, 1.0e-04, 1.0e-04]
+  attitude:         [1.0e-04, 1.0e-04, 1.0e-04]
+  velocity:         [1.0e-03, 1.0e-03, 1.0e-03]
+  omega:            [1.0e-03, 1.0e-03, 1.0e-03]
+  acceleration:     [1.0e-05, 1.0e-05, 1.0e-15]
+  alpha:            [1.0e-03, 1.0e-03, 1.0e-03]
 
 # For the IMU error filter
 
 #  Initial uncertainty
 imu_initial_root_cov:
-  acc_bias:         [1.0e-02, 1.0e-02, 1.0e-02]  # Initial accel bias (m/s^2)
-  acc_scale:        [1.0e-02, 1.0e-02, 1.0e-02]  # Initial accel scale
-  gyr_bias:         [1.0e-02, 1.0e-02, 1.0e-02]  # Initial gyro bias (rads/s^2)
-  gyr_scale:        [1.0e-02, 1.0e-02, 1.0e-02]  # Initial gyro scale
+  acc_scale:        [1.0e-04, 1.0e-04, 1.0e-04]
+  acc_bias:         [1.0e-04, 1.0e-04, 1.0e-04]
+  gyr_scale:        [1.0e-04, 1.0e-04, 1.0e-04]
+  gyr_bias:         [1.0e-02, 1.0e-02, 1.0e-02]
 
 # Process noise
 imu_process_noise_root_cov:
-  acc_bias:         [1.0e-02, 1.0e-02, 1.0e-02]  # Initial accel bias (m/s^2)
-  acc_scale:        [1.0e-02, 1.0e-02, 1.0e-02]  # Initial accel scale
-  gyr_bias:         [1.0e-02, 1.0e-02, 1.0e-02]  # Initial gyro bias (rads/s^2)
-  gyr_scale:        [1.0e-02, 1.0e-02, 1.0e-02]  # Initial gyro scale
+  acc_scale:        [0, 0, 0]
+  acc_bias:         [0, 0, 0]
+  gyr_scale:        [0, 0, 0]
+  gyr_bias:         [1.0e-02, 1.0e-02, 1.0e-02]
 
 # For measurements
 
