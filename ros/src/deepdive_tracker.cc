@@ -42,7 +42,7 @@ enum Keys : uint8_t {
   // STATE
   Position,                     // Position (world frame, m)
   Attitude,                     // Attitude as a quaternion (world to body frame)
-  Velocity,                     // Velocity (world frame, m/s)
+  Velocity,                     // Velocity (body frame, m/s)
   Omega,                        // Angular velocity (body frame, rads/s)
   Acceleration,                 // Acceleration (body frame, m/s^2)
   Alpha,                        // Angular acceleration (body frame, rads/s^2)
@@ -132,6 +132,12 @@ Eigen::Vector3d imu_proc_as_;        // Process noise: Accel scale
 Eigen::Vector3d imu_proc_gb_;        // Process noise: Gyro bias
 Eigen::Vector3d imu_proc_gs_;        // Process noise: Gyro scale
 
+// Default IMU limits
+Eigen::Vector2d imu_lim_ab_;
+Eigen::Vector2d imu_lim_as_;
+Eigen::Vector2d imu_lim_gb_;
+Eigen::Vector2d imu_lim_gs_;
+
 // Default measurement errors
 bool correct_ = false;               // Whether to correct light parameters
 Eigen::Vector3d gravity_;            // Gravity
@@ -161,6 +167,8 @@ namespace UKF {
     template <> constexpr real_t Kappa<Error> = 3.0;
   }
 
+  // Tracking filter process and measurement models
+
   template <>
   Observation::CovarianceVector Observation::measurement_root_covariance(
     (Observation::CovarianceVector() << 
@@ -169,9 +177,9 @@ namespace UKF {
   template <> template <> State
   State::derivative<>() const {
     State output;
-    output.set_field<Position>(get_field<Velocity>());
-    output.set_field<Velocity>(
-      get_field<Attitude>().conjugate() * get_field<Acceleration>());
+    output.set_field<Position>(
+      get_field<Attitude>().conjugate() * get_field<Velocity>());
+    output.set_field<Velocity>(get_field<Acceleration>());
     UKF::Quaternion omega_q;
     omega_q.vec() = get_field<Omega>() * 0.5;
     omega_q.w() = 0;
@@ -185,21 +193,19 @@ namespace UKF {
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<Error, Accelerometer, State>(
     Error const& errors, State const& state) {
-    UKF::Vector<3> const& w = state.get_field<Omega>();
-    UKF::Vector<3> const& p = bTi_[tracker_].translation();
-    return errors.get_field<AccelerometerScale>().cwiseProduct(
-      bTi_[tracker_].linear().inverse() * w.cross(w.cross(p))
-        + state.get_field<Acceleration>()
-        + errors.get_field<AccelerometerBias>()
-        + state.get_field<Attitude>() * gravity_);
+    return state.get_field<Acceleration>() + state.get_field<Attitude>() * gravity_;
   }
 
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<Error, Gyroscope, State>(
     Error const& errors, State const& state) {
+    return state.get_field<Omega>() + errors.get_field<GyroscopeBias>();
+
+    /*
     return errors.get_field<GyroscopeScale>().cwiseProduct(
       bTi_[tracker_].linear().inverse() * state.get_field<Omega>()
         + errors.get_field<GyroscopeBias>());
+    */
   }
 
   template <> template <> real_t
@@ -224,6 +230,8 @@ namespace UKF {
     return angles[a];
   }
 
+  // Error filter process and measurement models
+
   template <> template <> Error
   Error::derivative<>() const {
     return Error::Zero();
@@ -232,45 +240,20 @@ namespace UKF {
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<State, Accelerometer, Error>(
     State const& state, Error const& errors) {
-    UKF::Vector<3> const& w = state.get_field<Omega>();
-    UKF::Vector<3> const& p = bTi_[tracker_].translation();
-    return errors.get_field<AccelerometerScale>().cwiseProduct(
-      bTi_[tracker_].linear().inverse() * w.cross(w.cross(p))
-        + state.get_field<Acceleration>()
-        + errors.get_field<AccelerometerBias>()
-        + state.get_field<Attitude>() * gravity_);
+    return expected_measurement<Error, Accelerometer, State>(errors, state);
   }
 
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<State, Gyroscope, Error>(
     State const& state, Error const& errors) {
-    return errors.get_field<GyroscopeScale>().cwiseProduct(
-      bTi_[tracker_].linear().inverse() * state.get_field<Omega>()
-        + errors.get_field<GyroscopeBias>());
+    return expected_measurement<Error, Gyroscope, State>(errors, state);
   }
 
   template <> template <> real_t
   Observation::expected_measurement<State, Angle, Error>(
     State const& state, Error const& errors) {
-    Eigen::Affine3d wTb;
-    wTb.translation() = state.get_field<Position>();
-    wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = lTw_[lighthouse_] * wTb * bTt_[tracker_] * sensor_;
-    UKF::Vector<2> angles;
-    angles[0] = std::atan2(x[0], x[2]);
-    angles[1] = std::atan2(x[1], x[2]);
-    uint8_t const& a = axis_;
-    if (correct_) {
-      double const * const params = lighthouses_[lighthouse_].params[a];
-      angles[a] -= params[PARAM_PHASE];
-      angles[a] -= params[PARAM_TILT] * angles[1-a];
-      angles[a] -= params[PARAM_CURVE] * angles[1-a] * angles[1-a];
-      angles[a] -= params[PARAM_GIB_MAG] *
-        std::cos(angles[1-a] + params[PARAM_GIB_PHASE]);
-    }
-    return angles[a];
+    return expected_measurement<Error, Angle, State>(errors, state);
   }
-
 }
 
 // UTILITY FUNCTIONS
@@ -320,21 +303,23 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   for (size_t i = 0; i < msg->pulses.size(); i++) {
     // Basic sanity checks on the data
     if (fabs(msg->pulses[i].angle) > thresh_angle_ / 57.2958) {
-      ROS_INFO_STREAM_THROTTLE(1, "Rejected based on angle");
-      return;
+      ROS_INFO_STREAM_THROTTLE(1.0, "Rejected based on angle");
+      continue;
     }
-    if (fabs(msg->pulses[i].duration) < thresh_duration_ / 1e-6) {
-      ROS_INFO_STREAM_THROTTLE(1, "Rejected based on duration");
-      return;
+    if (fabs(msg->pulses[i].duration) < thresh_duration_ / 1e6) {
+      ROS_INFO_STREAM_THROTTLE(1.0, "Rejected based on duration");
+      continue;
     }
     if (msg->pulses[i].sensor >= NUM_SENSORS) {
-      ROS_INFO_STREAM_THROTTLE(1, "Rejected based on invalid sensor id");
-      return;
+      ROS_INFO_STREAM_THROTTLE(1.0, "Rejected based on invalid sensor id");
+      continue;
     }
     data.push_back(msg->pulses[i]);
   }
-  if (data.size() < thresh_count_)
+  if (thresh_count_ > 0 && data.size() < thresh_count_) {
     ROS_INFO_STREAM_THROTTLE(1, "Not enough data so skipping bundle.");
+    return;
+  }
 
   // Set the context correctly
   tracker_ = msg->header.frame_id;
@@ -368,6 +353,13 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
     filter_.innovation_step(obs, error->second.state);
   }
   filter_.a_posteriori_step();
+}
+
+UKF::Vector<3> ClampToReasonableValue(
+  UKF::Vector<3> const& val, Eigen::Vector2d const& lim) {
+  return UKF::Vector<3>(std::max(lim[0], std::min(lim[1], val[0])),
+                        std::max(lim[0], std::min(lim[1], val[1])),
+                        std::max(lim[0], std::min(lim[1], val[2])));
 }
 
 // This will be called at approximately 250Hz
@@ -413,15 +405,15 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   error->second.innovation_step(obs, filter_.state);
   error->second.a_posteriori_step(); 
 
-  /*
-  // Clip parameters to physically reasonable values. 
-  UKF::Vector<3> temp;
-  temp = ahrs_errors.state.get_field<AccelerometerBias>();
-  temp[0] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[0]));
-  temp[1] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[1]));
-  temp[2] = std::max(real_t(-G_ACCEL/4.0), std::min(real_t(G_ACCEL/4.0), temp[2]));
-  error->second.state.set_field<AccelerometerBias>(temp);
-  */
+  // Clip parameters to physically reasonable values.
+  error->second.state.set_field<AccelerometerBias>(ClampToReasonableValue(
+    error->second.state.get_field<AccelerometerBias>(), imu_lim_ab_));
+  error->second.state.set_field<AccelerometerScale>(ClampToReasonableValue(
+    error->second.state.get_field<AccelerometerScale>(), imu_lim_as_));
+  error->second.state.set_field<GyroscopeBias>(ClampToReasonableValue(
+    error->second.state.get_field<GyroscopeBias>(), imu_lim_gb_));
+  error->second.state.set_field<GyroscopeScale>(ClampToReasonableValue(
+    error->second.state.get_field<GyroscopeScale>(), imu_lim_gs_));
 
   // Propagate the filter
   filter_.a_priori_step(dt);
@@ -586,6 +578,16 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
 
 // MAIN ENTRY POINT OF APPLICATION
 
+bool GetPairParam(ros::NodeHandle &nh,
+  std::string const& name, UKF::Vector<2> & data) {
+  std::vector<double> tmp;
+  if (!nh.getParam(name, tmp) || tmp.size() != 2)
+    return false;
+  data[0] = tmp[0];
+  data[1] = tmp[1];
+  return true;
+}
+
 bool GetVectorParam(ros::NodeHandle &nh,
   std::string const& name, UKF::Vector<3> & data) {
   std::vector<double> tmp;
@@ -710,6 +712,13 @@ int main(int argc, char **argv) {
   if (!nh.getParam("rate", rate_))
     ROS_FATAL("Failed to get rate parameter.");
 
+  // Get the tracker update rate.
+  bool use_imu = true, use_light = true;
+  if (!nh.getParam("use/imu", use_imu))
+    ROS_FATAL("Failed to get use/imu  parameter.");
+  if (!nh.getParam("use/light", use_light))
+    ROS_FATAL("Failed to get use/light parameter.");
+
   // Get gravity
   if (!GetVectorParam(nh, "gravity", gravity_))
     ROS_FATAL("Failed to get gravity parameter.");
@@ -802,7 +811,7 @@ int main(int argc, char **argv) {
   if (!GetVectorParam(nh, "imu_process_noise_root_cov/acc_bias", imu_proc_ab_))
     ROS_FATAL("Failed to get acc_bias parameter.");
   if (!GetVectorParam(nh, "imu_process_noise_root_cov/acc_scale", imu_proc_as_))
-    ROS_FATAL("Failed to get acc_scale parimu_process_noise_root_covameter.");
+    ROS_FATAL("Failed to get acc_scale parameter.");
   if (!GetVectorParam(nh, "imu_process_noise_root_cov/gyr_bias", imu_proc_gb_))
     ROS_FATAL("Failed to get gyr_bias parameter.");
   if (!GetVectorParam(nh, "imu_process_noise_root_cov/gyr_scale", imu_proc_gs_))
@@ -813,9 +822,18 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get accelerometer parameter.");
   if (!GetVectorParam(nh, "measurement_root_cov/gyroscope", obs_cov_gyr_))
     ROS_FATAL("Failed to get gyroscope parameter.");
-  
   if (!nh.getParam("measurement_root_cov/angle", obs_cov_ang_))
     ROS_FATAL("Failed to get angle parameter.");
+
+  // IMU limits
+  if (!GetPairParam(nh, "imu_limits/acc_bias", imu_lim_ab_))
+    ROS_FATAL("Failed to get acc_bias parameter.");
+  if (!GetPairParam(nh, "imu_limits/acc_scale", imu_lim_as_))
+    ROS_FATAL("Failed to get acc_scale parameter.");
+  if (!GetPairParam(nh, "imu_limits/gyr_bias", imu_lim_gb_))
+    ROS_FATAL("Failed to get gyr_bias parameter.");
+  if (!GetPairParam(nh, "imu_limits/gyr_scale", imu_lim_gs_))
+    ROS_FATAL("Failed to get gyr_scale parameter.");
 
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
@@ -834,18 +852,17 @@ int main(int argc, char **argv) {
     (topic_twist, 0);
 
   // Subscribe to the motion and light callbacks
-  ros::Subscriber sub_tracker  = 
-    nh.subscribe<deepdive_ros::Trackers>("/trackers", 1000, std::bind(
-      TrackerCallback, std::placeholders::_1, std::ref(trackers_),
-        NewTrackerCallback));
-  ros::Subscriber sub_lighthouse = 
-    nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1000, std::bind(
-      LighthouseCallback, std::placeholders::_1, std::ref(lighthouses_),
-        NewLighthouseCallback));
-  ros::Subscriber sub_light =
-    nh.subscribe("/light", 1000, LightCallback);
-  //ros::Subscriber sub_imu =
-  //  nh.subscribe("/imu", 1000, ImuCallback);
+  std::vector<ros::Subscriber> subs;
+  subs.push_back(nh.subscribe<deepdive_ros::Trackers>("/trackers", 1000,
+    std::bind(TrackerCallback, std::placeholders::_1,
+      std::ref(trackers_), NewTrackerCallback)));
+  subs.push_back(nh.subscribe<deepdive_ros::Lighthouses>("/lighthouses", 1000,
+    std::bind(LighthouseCallback, std::placeholders::_1,
+      std::ref(lighthouses_), NewLighthouseCallback)));
+  if (use_light)
+    subs.push_back(nh.subscribe("/light", 1000, LightCallback));
+  if (use_imu)
+    subs.push_back(nh.subscribe("/imu", 1000, ImuCallback));
 
   // Start a timer to callback
   ros::Timer timer = nh.createTimer(

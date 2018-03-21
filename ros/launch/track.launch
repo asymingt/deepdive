@@ -15,7 +15,7 @@
   <node if="$(arg offline)"
         pkg="rosbag" type="play"
         name="deepdive_player" output="log"
-        args="--clock -d 1 -k -r $(arg speed) $(arg f_data)">
+        args="--clock --hz=1000 -d 1 -k -r $(arg speed) $(arg f_data)">
     <remap from="/tf" to="/tf/dev/null"/>
   </node>
   <node unless="$(arg offline)"

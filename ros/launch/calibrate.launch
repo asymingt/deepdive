@@ -15,7 +15,7 @@
   <node if="$(arg offline)"
         pkg="rosbag" type="play"
         name="deepdive_player" output="log"
-        args="--clock -k -d 1 -r $(arg speed) $(arg f_data)"/>
+        args="--clock --hz=1000 -k -d 1 -r $(arg speed) $(arg f_data)"/>
   <node unless="$(arg offline)"
         pkg="deepdive_ros" type="deepdive_bridge"
         name="$(arg profile)_bridge" output="$(arg output)"/>
