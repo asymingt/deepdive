@@ -40,17 +40,20 @@
 // State indexes
 enum Keys : uint8_t {
   // STATE
-  Position,                     // Position (world frame, m)
-  Attitude,                     // Attitude as a quaternion (world to body frame)
-  Velocity,                     // Velocity (body frame, m/s)
-  Omega,                        // Angular velocity (body frame, rads/s)
-  Acceleration,                 // Acceleration (body frame, m/s^2)
-  Alpha,                        // Angular acceleration (body frame, rads/s^2)
+  Position,             // Position (world frame, m)
+  Attitude,             // Attitude as a quaternion (world to body frame)
+  Velocity,             // Velocity (body frame, m/s)
+  Omega,                // Angular velocity (body frame, rads/s)
+  Acceleration,         // Acceleration (body frame, m/s^2)
+  Alpha,                // Angular acceleration (body frame, rads/s^2)
   // ERRORS
-  GyroscopeBias,                // Gyroscope bias offset (body frame, rad/s)
+  GyroscopeBias,        // Gyroscope bias offset (body frame, rad/s)
+  GyroscopeScale,       // Gyroscope scale factor (body frame, multiplier)
+  AccelerometerBias,    // Accelerometer bias offset (body frame, m/s^2)
+  AccelerometerScale,   // Accelerometer scale factor (body frame, mutliplier)
   // MEASUREMENTS
-  Accelerometer,                // Acceleration (body frame, m/s^2)
-  Gyroscope,                    // Gyroscope (body frame, rads/s)
+  Accelerometer,        // Acceleration (body frame, m/s^2)
+  Gyroscope,            // Gyroscope (body frame, rads/s)
   Angle
 };
 
@@ -84,7 +87,10 @@ using TrackingFilter = UKF::Core<
 
 // Parameters
 using Error = UKF::StateVector<
-  UKF::Field<GyroscopeBias, UKF::Vector<3>>
+  UKF::Field<AccelerometerBias, UKF::Vector<3>>,
+  UKF::Field<AccelerometerScale, UKF::Vector<3>>,
+  UKF::Field<GyroscopeBias, UKF::Vector<3>>,
+  UKF::Field<GyroscopeScale, UKF::Vector<3>>
 >;
 
 // For parameter estimation
@@ -97,8 +103,15 @@ using ErrorFilter = UKF::Core<
 typedef std::map<std::string, Eigen::Affine3d> TransformMap;
 typedef std::map<std::string, ErrorFilter> ErrorMap;
 
+// Default IMU errors
+Eigen::Vector3d imu_cov_ab_;         // Initial covariance: Accel bias
+Eigen::Vector3d imu_cov_as_;         // Initial covariance: Accel scale
 Eigen::Vector3d imu_cov_gb_;         // Initial covariance: Gyro bias
+Eigen::Vector3d imu_cov_gs_;         // Initial covariance: Gyro scale
+Eigen::Vector3d imu_proc_ab_;        // Process noise: Accel bias
+Eigen::Vector3d imu_proc_as_;        // Process noise: Accel scale
 Eigen::Vector3d imu_proc_gb_;        // Process noise: Gyro bias
+Eigen::Vector3d imu_proc_gs_;        // Process noise: Gyro scale
 
 // GLOBAL DATA STRUCTURES
 
@@ -178,9 +191,27 @@ namespace UKF {
     Eigen::Matrix3d iRb = iTb_[tracker_].linear();
     Eigen::Vector3d r = iTb_[tracker_].inverse().translation();
     Eigen::Vector3d w = state.get_field<Omega>();
-    return iRb * state.get_field<Acceleration>()        // Acceleration
-      + iRb * w.cross(w.cross(r))                       // Centripetal force
-      + iRb * state.get_field<Attitude>() * gravity_;   // Gravity
+    /*
+    Eigen::Vector3d specific = iRb * state.get_field<Acceleration>();
+    Eigen::Vector3d centripetal = iRb * w.cross(w.cross(r));
+    Eigen::Vector3d gravitational = iRb * state.get_field<Attitude>() * gravity_;
+    Eigen::Vector3d bias = -error.get_field<AccelerometerBias>();
+    Eigen::Vector3d scale = error.get_field<AccelerometerScale>().cwiseInverse();
+    Eigen::Vector3d accel = 
+    ROS_INFO_STREAM("tracker_: " << tracker_);
+    ROS_INFO_STREAM("specific accel: " << specific);
+    ROS_INFO_STREAM("centripetal accel: " << centripetal);
+    ROS_INFO_STREAM("gravitational accel: " << gravitational);
+    ROS_INFO_STREAM("bias accel: " << bias);
+    ROS_INFO_STREAM("scale accel: " << scale);
+    ROS_INFO_STREAM("total accel: " << accel);
+    */
+    // Return acceleration
+    return error.get_field<AccelerometerScale>().cwiseInverse().cwiseProduct(
+       -error.get_field<AccelerometerBias>()              // Bias
+      + iRb * state.get_field<Acceleration>()             // Specific
+      + iRb * w.cross(w.cross(r))                         // Centripetal
+      + iRb * state.get_field<Attitude>() * gravity_);    // Gravity
   }
 
   // See http://www.mdpi.com/1424-8220/11/7/6771/htm
@@ -188,8 +219,9 @@ namespace UKF {
   Observation::expected_measurement<State, Gyroscope, Error>(
     State const& state, Error const& error) {
     Eigen::Matrix3d iRb = iTb_[tracker_].linear();
-    return iRb * state.get_field<Omega>()         // Angular velocity in IMU
-      + error.get_field<GyroscopeBias>();         // Gyro boas in IMU
+    return error.get_field<GyroscopeScale>().cwiseInverse().cwiseProduct(
+       -error.get_field<GyroscopeBias>()                  // Bias
+      + iRb * state.get_field<Omega>());                  // Specific
   }
 
   template <> template <> real_t
@@ -398,6 +430,14 @@ void TimerCallback(ros::TimerEvent const& info) {
   // Propagate the filter forward
   filter_.a_priori_step(dt);
 
+  // Debug
+  ErrorMap::iterator it;
+  for (it = errors_.begin(); it != errors_.end(); it++) {
+    ROS_INFO_STREAM(it->first << ":");
+    ROS_INFO_STREAM(it->second.state);
+  }
+  ROS_INFO_STREAM(filter_.state);
+  ROS_INFO_STREAM("Filter:");
   ROS_INFO_STREAM(filter_.state);
 
   // The filter relates WORLD and IMU frames
@@ -489,14 +529,28 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
   ROS_INFO_STREAM("Found tracker " << tracker->first);
   // Initialize the error filter
   ErrorFilter & error = errors_[tracker->first];
+  error.state.set_field<AccelerometerBias>(UKF::Vector<3>(
+    tracker->second.errors[ERROR_ACC_BIAS][0],
+    tracker->second.errors[ERROR_ACC_BIAS][1],
+    tracker->second.errors[ERROR_ACC_BIAS][2]));
+  error.state.set_field<AccelerometerScale>(UKF::Vector<3>(
+    tracker->second.errors[ERROR_ACC_SCALE][0],
+    tracker->second.errors[ERROR_ACC_SCALE][1],
+    tracker->second.errors[ERROR_ACC_SCALE][2]));
   error.state.set_field<GyroscopeBias>(UKF::Vector<3>(
     tracker->second.errors[ERROR_GYR_BIAS][0],
     tracker->second.errors[ERROR_GYR_BIAS][1],
     tracker->second.errors[ERROR_GYR_BIAS][2]));
+  error.state.set_field<GyroscopeScale>(UKF::Vector<3>(
+    tracker->second.errors[ERROR_GYR_SCALE][0],
+    tracker->second.errors[ERROR_GYR_SCALE][1],
+    tracker->second.errors[ERROR_GYR_SCALE][2]));
   error.covariance = Error::CovarianceMatrix::Zero();
-  error.covariance.diagonal() << imu_cov_gb_;
+  error.covariance.diagonal() <<
+    imu_cov_ab_, imu_cov_as_, imu_cov_gb_, imu_cov_gs_;
   error.process_noise_covariance = Error::CovarianceMatrix::Zero();
-  error.process_noise_covariance.diagonal() << imu_proc_gb_;
+  error.process_noise_covariance.diagonal() <<
+    imu_proc_ab_, imu_proc_as_, imu_proc_gb_, imu_proc_gs_;
   // Cache a transform //
   Eigen::Vector3d v;
   Eigen::Affine3d bTh, tTh, tTi;
@@ -762,13 +816,25 @@ int main(int argc, char **argv) {
   if (!nh.getParam("measurement_cov/angle", obs_cov_ang_))
     ROS_FATAL("Failed to get angle parameter.");
 
- // IMU error : initial estimate
+  // IMU error : initial estimate
+  if (!GetVectorParam(nh, "imu_initial_cov/acc_bias", imu_cov_ab_))
+    ROS_FATAL("Failed to get acc_bias parameter.");
+  if (!GetVectorParam(nh, "imu_initial_cov/acc_scale", imu_cov_as_))
+    ROS_FATAL("Failed to get acc_scale parameter.");
   if (!GetVectorParam(nh, "imu_initial_cov/gyr_bias", imu_cov_gb_))
     ROS_FATAL("Failed to get gyr_bias parameter.");
+  if (!GetVectorParam(nh, "imu_initial_cov/gyr_scale", imu_cov_gs_))
+    ROS_FATAL("Failed to get gyr_scale parameter.");
 
   // IMU error : initial estimate
+  if (!GetVectorParam(nh, "imu_process_noise_cov/acc_bias", imu_proc_ab_))
+    ROS_FATAL("Failed to get acc_bias parameter.");
+  if (!GetVectorParam(nh, "imu_process_noise_cov/acc_scale", imu_proc_as_))
+    ROS_FATAL("Failed to get acc_scale parameter.");
   if (!GetVectorParam(nh, "imu_process_noise_cov/gyr_bias", imu_proc_gb_))
     ROS_FATAL("Failed to get gyr_bias parameter.");
+  if (!GetVectorParam(nh, "imu_process_noise_cov/gyr_scale", imu_proc_gs_))
+    ROS_FATAL("Failed to get gyr_scale parameter.");
 
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
