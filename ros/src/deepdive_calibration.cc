@@ -367,6 +367,7 @@ bool Solve() {
     // If we are refining the trajectory we need to add a correction
     if (refine_trajectory_) {
       // Add the correction
+      /*
       ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
         CorrectionCost, 6, 2, 1, 2, 1>(new CorrectionCost(wTb[kt->first]));
       problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
@@ -374,6 +375,7 @@ bool Solve() {
         reinterpret_cast<double*>(&wTb[kt->first][2]),    // pos: z
         reinterpret_cast<double*>(&wTb[kt->first][3]),    // rot: xy
         reinterpret_cast<double*>(&wTb[kt->first][5]));   // rot: z
+      */
       // Add the motion cost
       if (kt_p != corrections_.end()) {
         ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
@@ -489,6 +491,39 @@ bool Solve() {
       ROS_INFO_STREAM("Calibration written to " << calfile_);
     else
       ROS_INFO_STREAM("Could not write calibration to" << calfile_);
+    //
+    if (refine_trajectory_) {
+      ROS_INFO_STREAM("You requested tracjectory refining" << calfile_);
+      std::ofstream outfile;
+      outfile.open ("statistics.csv");
+      std::map<ros::Time, double[6]>::iterator it;
+      for (it = wTb.begin(); it != wTb.end(); it++) {
+        geometry_msgs::TransformStamped & tfs = corrections_[it->first];
+        Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
+        Eigen::AngleAxisd aa;
+        if (v.norm() > 0) {
+          aa.angle() = v.norm();
+          aa.axis() = v.normalized();
+        }
+        Eigen::Quaterniond q(aa);
+        outfile << (it->first - wTb.begin()->first).toSec() << ", "
+                << it->second[0] << ", "
+                << it->second[1] << ", "
+                << it->second[2] << ", "
+                << q.w() << ", "
+                << q.x() << ", "
+                << q.y() << ", "
+                << q.z() << ", "
+                << tfs.transform.translation.x << ", "
+                << tfs.transform.translation.y << ", "
+                << tfs.transform.translation.z << ", "
+                << tfs.transform.rotation.w << ", "
+                << tfs.transform.rotation.x << ", "
+                << tfs.transform.rotation.y << ", "
+                << tfs.transform.rotation.z << std::endl;
+      }
+      outfile.close();
+    }
     // Print the trajectory of the body-frame in the world-frame
     if (visualize_) {
       // Publish path
