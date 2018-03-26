@@ -121,28 +121,34 @@ initial_estimate:
 
 #  Initial uncertainty
 initial_cov:
-  position:         [10, 10, 10]
+  position:         [1.0e-04, 1.0e-04, 1.0e-04]
   attitude:         [10, 10, 10]
-  velocity:         [1.0e-03, 1.0e-03, 1.0e-03]
-  omega:            [1.0e-03, 1.0e-03, 1.0e-03]
-  acceleration:     [1.0e-03, 1.0e-03, 1.0e-03]
-  alpha:            [1.0e-03, 1.0e-03, 1.0e-03]
+  velocity:         [1.0e-20, 1.0e-20, 1.0e-20]
+  omega:            [1.0e-20, 1.0e-20, 1.0e-20]
+  acceleration:     [1.0e-20, 1.0e-20, 1.0e-20]
+  alpha:            [1.0e-20, 1.0e-20, 1.0e-20]
 
 # Process noise
 process_noise_cov:
-  position:         [1.0e-08, 1.0e-08, 1.0e-08]
-  attitude:         [1.0e-08, 1.0e-08, 1.0e-08]
-  velocity:         [1.0e-06, 1.0e-06, 1.0e-06]
-  omega:            [1.0e-06, 1.0e-06, 1.0e-06]
-  acceleration:     [1.0e-10, 1.0e-10, 1.0e-10]
-  alpha:            [1.0e-10, 1.0e-10, 1.0e-10]
+  position:         [1.0e-20, 1.0e-20, 1.0e-20]
+  attitude:         [1.0e-20, 1.0e-20, 1.0e-20]
+  velocity:         [1.0e-20, 1.0e-20, 1.0e-20]
+  omega:            [1.0e-20, 1.0e-20, 1.0e-20]
+  acceleration:     [1.0e-20, 1.0e-20, 1.0e-20]
+  alpha:            [1.0e-20, 1.0e-20, 1.0e-20]
 
 #  Initial uncertainty
 imu_initial_cov:
-  gyr_bias:         [1.0e-01, 1.0e-01, 1.0e-01]
+  acc_scale:        [1.0e-20, 1.0e-20, 1.0e-20]
+  acc_bias:         [1.0e-20, 1.0e-20, 1.0e-20]
+  gyr_scale:        [1.0e-20, 1.0e-20, 1.0e-20]
+  gyr_bias:         [1.0e-04, 1.0e-04, 1.0e-04]
 
 # Process noise
 imu_process_noise_cov:
+  acc_scale:        [0, 0, 0]
+  acc_bias:         [0, 0, 0]
+  gyr_scale:        [0, 0, 0]
   gyr_bias:         [2.4e-10, 2.4e-10, 2.4e-10]
 
 # For measurements

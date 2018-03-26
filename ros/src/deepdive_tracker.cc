@@ -151,6 +151,7 @@ uint8_t axis_;                       // Active axis
 
 // Are we initialized and ready to track
 bool initialized_ = false;
+bool measurement_ = false;
 
 // TRACKING FILTER
 
@@ -191,22 +192,6 @@ namespace UKF {
     Eigen::Matrix3d iRb = iTb_[tracker_].linear();
     Eigen::Vector3d r = iTb_[tracker_].inverse().translation();
     Eigen::Vector3d w = state.get_field<Omega>();
-    /*
-    Eigen::Vector3d specific = iRb * state.get_field<Acceleration>();
-    Eigen::Vector3d centripetal = iRb * w.cross(w.cross(r));
-    Eigen::Vector3d gravitational = iRb * state.get_field<Attitude>() * gravity_;
-    Eigen::Vector3d bias = -error.get_field<AccelerometerBias>();
-    Eigen::Vector3d scale = error.get_field<AccelerometerScale>().cwiseInverse();
-    Eigen::Vector3d accel = 
-    ROS_INFO_STREAM("tracker_: " << tracker_);
-    ROS_INFO_STREAM("specific accel: " << specific);
-    ROS_INFO_STREAM("centripetal accel: " << centripetal);
-    ROS_INFO_STREAM("gravitational accel: " << gravitational);
-    ROS_INFO_STREAM("bias accel: " << bias);
-    ROS_INFO_STREAM("scale accel: " << scale);
-    ROS_INFO_STREAM("total accel: " << accel);
-    */
-    // Return acceleration
     return error.get_field<AccelerometerScale>().cwiseInverse().cwiseProduct(
        -error.get_field<AccelerometerBias>()              // Bias
       + iRb * state.get_field<Acceleration>()             // Specific
@@ -292,6 +277,7 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   static double dt;
   if (!use_light_ || !initialized_ || !Delta(dt))
     return;
+  measurement_ = true;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -375,6 +361,7 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   static double dt;
   if ((!use_accelerometer_ && !use_gyroscope_) || !initialized_ || !Delta(dt))
     return;
+  measurement_ = true;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -424,13 +411,14 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 // This will be called back at the desired tracking rate
 void TimerCallback(ros::TimerEvent const& info) {
   static double dt;
-  if (!initialized_ || !Delta(dt))
+  if (!initialized_ || !Delta(dt) || !measurement_)
     return;
 
   // Propagate the filter forward
   filter_.a_priori_step(dt);
 
   // Debug
+  /*
   ErrorMap::iterator it;
   for (it = errors_.begin(); it != errors_.end(); it++) {
     ROS_INFO_STREAM(it->first << ":");
@@ -439,6 +427,7 @@ void TimerCallback(ros::TimerEvent const& info) {
   ROS_INFO_STREAM(filter_.state);
   ROS_INFO_STREAM("Filter:");
   ROS_INFO_STREAM(filter_.state);
+  */
 
   // The filter relates WORLD and IMU frames
   ros::Time now = ros::Time::now();
@@ -576,7 +565,7 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
   tTi.linear() = Eigen::AngleAxisd(v.norm(),
     (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // Global cache
-  bTt_[tracker->first] = bTh * tTh.inverse();
+  bTt_[tracker->first] = bTh.inverse() * tTh.inverse();
   iTb_[tracker->first] = tTi.inverse() * tTh * bTh.inverse();
   // Check if we have got all info from lighthouses and trackers
   CheckIfReadyToTrack();
