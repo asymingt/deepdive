@@ -26,16 +26,16 @@ frames:
 
 # Thresholds used to reject measurements
 thresholds:
-  count:            4          # Min pulses/sweep to add to solver
+  count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         1.0        # Threshod on duration (in microsecs)
+  duration:         1.00       # Threshod on duration (in microsecs)
   correction:       0.01       # 10ms threshold on mapped time
 
 # Publish rviz markers for the sensors
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -80,7 +80,7 @@ refine:
 weight:
   light:            1.0
   correction:       1.0
-  motion:           10.0
+  motion:           100.0
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
@@ -106,8 +106,8 @@ gravity:            [0.0, 0.0, 9.80665]
 
 # Which measurements to use
 use:
-  gyroscope:        true
-  accelerometer:    true
+  gyroscope:        false
+  accelerometer:    false
   light:            true
 
 # Initial state value
@@ -122,7 +122,7 @@ initial_estimate:
 #  Initial uncertainty
 initial_cov:
   position:         [1.0e-04, 1.0e-04, 1.0e-04]
-  attitude:         [10, 10, 10]
+  attitude:         [1.0e-04, 1.0e-04, 1.0e-04]
   velocity:         [1.0e-20, 1.0e-20, 1.0e-20]
   omega:            [1.0e-20, 1.0e-20, 1.0e-20]
   acceleration:     [1.0e-20, 1.0e-20, 1.0e-20]

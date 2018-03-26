@@ -41,7 +41,7 @@
 enum Keys : uint8_t {
   // STATE
   Position,             // Position (world frame, m)
-  Attitude,             // Attitude as a quaternion (world to body frame)
+  Attitude,             // Attitude quaternion
   Velocity,             // Velocity (body frame, m/s)
   Omega,                // Angular velocity (body frame, rads/s)
   Acceleration,         // Acceleration (body frame, m/s^2)
@@ -151,7 +151,6 @@ uint8_t axis_;                       // Active axis
 
 // Are we initialized and ready to track
 bool initialized_ = false;
-bool measurement_ = false;
 
 // TRACKING FILTER
 
@@ -172,15 +171,17 @@ namespace UKF {
   template <> template <> State
   State::derivative<>() const {
     State output;
-    output.set_field<Position>(
-      get_field<Attitude>().conjugate() * get_field<Velocity>());
-    output.set_field<Velocity>(get_field<Acceleration>());
+    // Linear
+    output.set_field<Position>(get_field<Velocity>());
+    output.set_field<Velocity>(
+      get_field<Attitude>() * get_field<Acceleration>());
+    output.set_field<Acceleration>(UKF::Vector<3>(0, 0, 0));
+    // Angular
     UKF::Quaternion omega_q;
     omega_q.vec() = get_field<Omega>() * 0.5;
     omega_q.w() = 0;
-    output.set_field<Attitude>(omega_q.conjugate() * get_field<Attitude>());
+    output.set_field<Attitude>(omega_q * get_field<Attitude>());
     output.set_field<Omega>(get_field<Alpha>());
-    output.set_field<Acceleration>(UKF::Vector<3>(0, 0, 0));
     output.set_field<Alpha>(UKF::Vector<3>(0, 0, 0));
     return output;
   }
@@ -190,13 +191,13 @@ namespace UKF {
   Observation::expected_measurement<State, Accelerometer, Error>(
     State const& state, Error const& error) {
     Eigen::Matrix3d iRb = iTb_[tracker_].linear();
-    Eigen::Vector3d r = iTb_[tracker_].inverse().translation();
+    Eigen::Vector3d r = iTb_[tracker_].translation();
     Eigen::Vector3d w = state.get_field<Omega>();
     return error.get_field<AccelerometerScale>().cwiseInverse().cwiseProduct(
-       -error.get_field<AccelerometerBias>()              // Bias
-      + iRb * state.get_field<Acceleration>()             // Specific
-      + iRb * w.cross(w.cross(r))                         // Centripetal
-      + iRb * state.get_field<Attitude>() * gravity_);    // Gravity
+       -error.get_field<AccelerometerBias>()                          // Bias
+      + iRb * state.get_field<Acceleration>()                         // Specific
+      + iRb * w.cross(w.cross(r))                                     // Centripetal
+      + iRb * (state.get_field<Attitude>().conjugate() * gravity_));  // Gravity
   }
 
   // See http://www.mdpi.com/1424-8220/11/7/6771/htm
@@ -205,8 +206,8 @@ namespace UKF {
     State const& state, Error const& error) {
     Eigen::Matrix3d iRb = iTb_[tracker_].linear();
     return error.get_field<GyroscopeScale>().cwiseInverse().cwiseProduct(
-       -error.get_field<GyroscopeBias>()                  // Bias
-      + iRb * state.get_field<Omega>());                  // Specific
+       -error.get_field<GyroscopeBias>()                              // Bias
+      + iRb * state.get_field<Omega>());                              // Specific
   }
 
   template <> template <> real_t
@@ -277,7 +278,6 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   static double dt;
   if (!use_light_ || !initialized_ || !Delta(dt))
     return;
-  measurement_ = true;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -361,7 +361,6 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
   static double dt;
   if ((!use_accelerometer_ && !use_gyroscope_) || !initialized_ || !Delta(dt))
     return;
-  measurement_ = true;
 
   // Check that we are recording and that the tracker/lighthouse is ready
   TrackerMap::iterator tracker = trackers_.find(msg->header.frame_id);
@@ -411,7 +410,7 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 // This will be called back at the desired tracking rate
 void TimerCallback(ros::TimerEvent const& info) {
   static double dt;
-  if (!initialized_ || !Delta(dt) || !measurement_)
+  if (!initialized_ || !Delta(dt))
     return;
 
   // Propagate the filter forward
