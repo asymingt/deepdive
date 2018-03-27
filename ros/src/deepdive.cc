@@ -29,7 +29,7 @@ void SendTransforms(
   LighthouseMap::const_iterator it;
   for (it = lighthouses.begin(); it != lighthouses.end(); it++)  {
     Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
-    Eigen::AngleAxisd aa;
+    Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
     if (v.norm() > 0) {
       aa.angle() = v.norm();
       aa.axis() = v.normalized();
@@ -52,7 +52,7 @@ void SendTransforms(
   TrackerMap::const_iterator jt;
   for (jt = trackers.begin(); jt != trackers.end(); jt++)  {
     Eigen::Vector3d v(jt->second.bTh[3], jt->second.bTh[4], jt->second.bTh[5]);
-    Eigen::AngleAxisd aa;
+    Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
     if (v.norm() > 0) {
       aa.angle() = v.norm();
       aa.axis() = v.normalized();

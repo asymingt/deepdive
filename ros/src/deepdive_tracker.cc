@@ -341,7 +341,7 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 
   // Correct the error filter
   error->second.a_priori_step(dt);
-  for (uint8_t i = 0; i < data.size(); i++) {
+  for (size_t i = 0; i < data.size(); i++) {
     // Set the context correctly
     sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
     sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];
@@ -355,7 +355,7 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
 
   // Correct the tracking filter
   filter_.a_priori_step(dt);
-  for (uint8_t i = 0; i < data.size(); i++) {
+  for (size_t i = 0; i < data.size(); i++) {
     // Set the context correctly
     sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
     sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];

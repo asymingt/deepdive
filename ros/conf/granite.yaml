@@ -121,8 +121,8 @@ initial_estimate:
 
 #  Initial uncertainty
 initial_cov:
-  position:         [1.0e-04, 1.0e-04, 1.0e-04]
-  attitude:         [1.0e-04, 1.0e-04, 1.0e-04]
+  position:         [4, 4, 4]
+  attitude:         [10, 10, 10]
   velocity:         [1.0e-20, 1.0e-20, 1.0e-20]
   omega:            [1.0e-20, 1.0e-20, 1.0e-20]
   acceleration:     [1.0e-20, 1.0e-20, 1.0e-20]
