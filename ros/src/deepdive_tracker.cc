@@ -41,7 +41,7 @@
 enum Keys : uint8_t {
   // STATE
   Position,             // Position (world frame, m)
-  Attitude,             // Attitude quaternion
+  Attitude,             // Attitude quaternion (rotates vec from body to world)
   Velocity,             // Velocity (body frame, m/s)
   Omega,                // Angular velocity (body frame, rads/s)
   Acceleration,         // Acceleration (body frame, m/s^2)
@@ -145,10 +145,15 @@ TransformMap wTl_;                   // ALL: world -> lighthouse
 TransformMap bTh_;                   // ALL: head -> body
 TransformMap tTh_;                   // ALL: head -> tracking
 TransformMap tTi_;                   // ALL: imu -> tracking
-std::string lighthouse_;             // Active lighthouse
-std::string tracker_;                // Active tracker
-Eigen::Vector3d sensor_;             // Active sensor
-uint8_t axis_;                       // Active axis
+
+// Context data
+struct Context {
+  std::string lighthouse;            // Active lighthouse
+  std::string tracker;               // Active tracker
+  Eigen::Vector3d sensor;            // Active sensor
+  uint8_t axis;                      // Active axis
+};
+
 
 // Are we initialized and ready to track
 bool initialized_ = false;
@@ -171,16 +176,13 @@ namespace UKF {
   // Standard 6DoF kinematics with constant Omega and Acceleration assumption
   template <> template <> State
   State::derivative<>() const {
-    State output;
-    // Linear
-    output.set_field<Position>(get_field<Velocity>());
-    output.set_field<Velocity>(
-      get_field<Attitude>() * get_field<Acceleration>());
-    output.set_field<Acceleration>(UKF::Vector<3>(0, 0, 0));
-    // Angular
     UKF::Quaternion omega_q;
     omega_q.vec() = get_field<Omega>() * 0.5;
     omega_q.w() = 0;
+    State output;
+    output.set_field<Position>(get_field<Velocity>());
+    output.set_field<Velocity>(get_field<Attitude>() * get_field<Acceleration>());
+    output.set_field<Acceleration>(UKF::Vector<3>(0, 0, 0));
     output.set_field<Attitude>(omega_q * get_field<Attitude>());
     output.set_field<Omega>(get_field<Alpha>());
     output.set_field<Alpha>(UKF::Vector<3>(0, 0, 0));
@@ -189,11 +191,11 @@ namespace UKF {
 
   // See http://www.mdpi.com/1424-8220/11/7/6771/htm
   template <> template <> UKF::Vector<3>
-  Observation::expected_measurement<State, Accelerometer, Error>(
-    State const& state, Error const& error) {
-    Eigen::Affine3d iTb = tTi_[tracker_].inverse()    // light -> imu
-                        * tTh_[tracker_]              // head -> light
-                        * bTh_[tracker_].inverse();   // body -> head
+  Observation::expected_measurement<State, Accelerometer, Error, Context>(
+    State const& state, Error const& error, Context const& context) {
+    Eigen::Affine3d iTb = tTi_[context.tracker].inverse()    // light -> imu
+                        * tTh_[context.tracker]              // head -> light
+                        * bTh_[context.tracker].inverse();   // body -> head
     Eigen::Vector3d r = iTb.translation();
     Eigen::Vector3d w = state.get_field<Omega>();
     return error.get_field<AccelerometerScale>().cwiseInverse().cwiseProduct(
@@ -201,16 +203,15 @@ namespace UKF {
       + iTb.linear() * w.cross(w.cross(r))
       + iTb.linear() * (state.get_field<Attitude>().conjugate() * gravity_)
       - error.get_field<AccelerometerBias>());
-
   }
 
   // See http://www.mdpi.com/1424-8220/11/7/6771/htm
   template <> template <> UKF::Vector<3>
-  Observation::expected_measurement<State, Gyroscope, Error>(
-    State const& state, Error const& error) {
-    Eigen::Affine3d iTb = tTi_[tracker_].inverse()    // light -> imu
-                        * tTh_[tracker_]              // head -> light
-                        * bTh_[tracker_].inverse();   // body -> head
+  Observation::expected_measurement<State, Gyroscope, Error, Context>(
+    State const& state, Error const& error, Context const& context) {
+    Eigen::Affine3d iTb = tTi_[context.tracker].inverse()    // light -> imu
+                        * tTh_[context.tracker]              // head -> light
+                        * bTh_[context.tracker].inverse();   // body -> head
     return error.get_field<GyroscopeScale>().cwiseInverse().cwiseProduct(
         iTb.linear() * state.get_field<Omega>()
       - error.get_field<GyroscopeBias>());
@@ -218,22 +219,22 @@ namespace UKF {
 
   // Lighthouse angle prediction
   template <> template <> real_t
-  Observation::expected_measurement<State, Angle, Error>(
-    State const& state, Error const& error) {
+  Observation::expected_measurement<State, Angle, Error, Context>(
+    State const& state, Error const& error, Context const& context) {
     Eigen::Affine3d wTb;
     wTb.translation() = state.get_field<Position>();
     wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = wTl_[lighthouse_].inverse()  // world -> lighthouse
-                     * wTb                          // body -> world
-                     * bTh_[tracker_]               // head -> body
-                     * tTh_[tracker_].inverse()     // tracker -> head
-                     * sensor_;
+    UKF::Vector<3> x = wTl_[context.lighthouse].inverse()  // world -> lh
+                     * wTb                                 // body -> world
+                     * bTh_[context.tracker]               // head -> body
+                     * tTh_[context.tracker].inverse()     // tracker -> head
+                     * context.sensor;
     UKF::Vector<2> angles;
     angles[0] = std::atan2(x[0], x[2]);
     angles[1] = std::atan2(x[1], x[2]);
-    uint8_t const& a = axis_;
+    uint8_t const& a = context.axis;
     if (correct_) {
-      double const * const params = lighthouses_[lighthouse_].params[a];
+      double const * const params = lighthouses_[context.lighthouse].params[a];
       angles[a] -= params[PARAM_PHASE];
       angles[a] -= params[PARAM_TILT] * angles[1-a];
       angles[a] -= params[PARAM_CURVE] * angles[1-a] * angles[1-a];
@@ -251,21 +252,24 @@ namespace UKF {
   }
 
   template <> template <> UKF::Vector<3>
-  Observation::expected_measurement<Error, Accelerometer, State>(
-    Error const& errors, State const& state) {
-    return expected_measurement<State, Accelerometer, Error>(state, errors);
+  Observation::expected_measurement<Error, Accelerometer, State, Context>(
+    Error const& errors, State const& state, Context const& context) {
+    return expected_measurement<State, Accelerometer, Error, Context>(
+      state, errors, context);
   }
 
   template <> template <> UKF::Vector<3>
-  Observation::expected_measurement<Error, Gyroscope, State>(
-    Error const& errors, State const& state) {
-    return expected_measurement<State, Gyroscope, Error>(state, errors);
+  Observation::expected_measurement<Error, Gyroscope, State, Context>(
+    Error const& errors, State const& state, Context const& context) {
+    return expected_measurement<State, Gyroscope, Error, Context>(
+      state, errors, context);
   }
 
   template <> template <> real_t
-  Observation::expected_measurement<Error, Angle, State>(
-    Error const& errors, State const& state) {
-    return expected_measurement<State, Angle, Error>(state, errors);
+  Observation::expected_measurement<Error, Angle, State, Context>(
+    Error const& errors, State const& state, Context const& context) {
+    return expected_measurement<State, Angle, Error, Context>(
+      state, errors, context);
   }
 }
 
@@ -335,21 +339,22 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   }
 
   // Set the context correctly
-  tracker_ = msg->header.frame_id;
-  lighthouse_ = msg->lighthouse;
-  axis_ = msg->axis;
+  Context context;
+  context.tracker = msg->header.frame_id;
+  context.lighthouse = msg->lighthouse;
+  context.axis = msg->axis;
 
   // Correct the error filter
   error->second.a_priori_step(dt);
   for (size_t i = 0; i < data.size(); i++) {
     // Set the context correctly
-    sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
-    sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];
-    sensor_[2] = tracker->second.sensors[6 * data[i].sensor + 2];
+    context.sensor[0] = tracker->second.sensors[6 * data[i].sensor + 0];
+    context.sensor[1] = tracker->second.sensors[6 * data[i].sensor + 1];
+    context.sensor[2] = tracker->second.sensors[6 * data[i].sensor + 2];
     // Create the observation
     Observation obs;
     obs.set_field<Angle>(data[i].angle);
-    error->second.innovation_step(obs, filter_.state);
+    error->second.innovation_step(obs, filter_.state, context);
   }
   error->second.a_posteriori_step();
 
@@ -357,13 +362,13 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   filter_.a_priori_step(dt);
   for (size_t i = 0; i < data.size(); i++) {
     // Set the context correctly
-    sensor_[0] = tracker->second.sensors[6 * data[i].sensor + 0];
-    sensor_[1] = tracker->second.sensors[6 * data[i].sensor + 1];
-    sensor_[2] = tracker->second.sensors[6 * data[i].sensor + 2];
+    context.sensor[0] = tracker->second.sensors[6 * data[i].sensor + 0];
+    context.sensor[1] = tracker->second.sensors[6 * data[i].sensor + 1];
+    context.sensor[2] = tracker->second.sensors[6 * data[i].sensor + 2];
     // Create the observation
     Observation obs;
     obs.set_field<Angle>(data[i].angle);
-    filter_.innovation_step(obs, error->second.state);
+    filter_.innovation_step(obs, error->second.state, context);
   }
   filter_.a_posteriori_step();
 }
@@ -398,7 +403,8 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
     msg->angular_velocity.z);
 
   // Set the context correctly
-  tracker_ = msg->header.frame_id;
+  Context context;
+  context.tracker = msg->header.frame_id;
 
   // Create a measurement
   Observation obs;
@@ -409,12 +415,12 @@ void ImuCallback(sensor_msgs::Imu::ConstPtr const& msg) {
 
   // Step the parameter filter
   error->second.a_priori_step(dt);
-  error->second.innovation_step(obs, filter_.state);
+  error->second.innovation_step(obs, filter_.state, context);
   error->second.a_posteriori_step(); 
 
   // Propagate the filter
   filter_.a_priori_step(dt);
-  filter_.innovation_step(obs, error->second.state);
+  filter_.innovation_step(obs, error->second.state, context);
   filter_.a_posteriori_step();
 }
 
