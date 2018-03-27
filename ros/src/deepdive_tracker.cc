@@ -141,9 +141,10 @@ Eigen::Vector3d obs_cov_gyr_;        // Measurement covariance: Gyroscope
 double obs_cov_ang_;                 // Measurement covariance: Angle
 
 // Intermediary data
-TransformMap lTw_;                   // ALL: world -> lighthouse
-TransformMap iTb_;                   // ALL: body -> imu
-TransformMap bTt_;                   // ALL: tracking -> body
+TransformMap wTl_;                   // ALL: world -> lighthouse
+TransformMap bTh_;                   // ALL: head -> body
+TransformMap tTh_;                   // ALL: head -> tracking
+TransformMap tTi_;                   // ALL: imu -> tracking
 std::string lighthouse_;             // Active lighthouse
 std::string tracker_;                // Active tracker
 Eigen::Vector3d sensor_;             // Active sensor
@@ -190,33 +191,43 @@ namespace UKF {
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<State, Accelerometer, Error>(
     State const& state, Error const& error) {
-    Eigen::Matrix3d iRb = iTb_[tracker_].linear();
-    Eigen::Vector3d r = iTb_[tracker_].translation();
+    Eigen::Affine3d iTb = tTi_[tracker_].inverse()    // light -> imu
+                        * tTh_[tracker_]              // head -> light
+                        * bTh_[tracker_].inverse();   // body -> head
+    Eigen::Vector3d r = iTb.translation();
     Eigen::Vector3d w = state.get_field<Omega>();
     return error.get_field<AccelerometerScale>().cwiseInverse().cwiseProduct(
-       -error.get_field<AccelerometerBias>()                          // Bias
-      + iRb * state.get_field<Acceleration>()                         // Specific
-      + iRb * w.cross(w.cross(r))                                     // Centripetal
-      + iRb * (state.get_field<Attitude>().conjugate() * gravity_));  // Gravity
+        iTb.linear() * state.get_field<Acceleration>()
+      + iTb.linear() * w.cross(w.cross(r))
+      + iTb.linear() * (state.get_field<Attitude>().conjugate() * gravity_)
+      - error.get_field<AccelerometerBias>());
+
   }
 
   // See http://www.mdpi.com/1424-8220/11/7/6771/htm
   template <> template <> UKF::Vector<3>
   Observation::expected_measurement<State, Gyroscope, Error>(
     State const& state, Error const& error) {
-    Eigen::Matrix3d iRb = iTb_[tracker_].linear();
+    Eigen::Affine3d iTb = tTi_[tracker_].inverse()    // light -> imu
+                        * tTh_[tracker_]              // head -> light
+                        * bTh_[tracker_].inverse();   // body -> head
     return error.get_field<GyroscopeScale>().cwiseInverse().cwiseProduct(
-       -error.get_field<GyroscopeBias>()                              // Bias
-      + iRb * state.get_field<Omega>());                              // Specific
+        iTb.linear() * state.get_field<Omega>()
+      - error.get_field<GyroscopeBias>());
   }
 
+  // Lighthouse angle prediction
   template <> template <> real_t
   Observation::expected_measurement<State, Angle, Error>(
     State const& state, Error const& error) {
     Eigen::Affine3d wTb;
     wTb.translation() = state.get_field<Position>();
     wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = lTw_[lighthouse_] * wTb * bTt_[tracker_] * sensor_;
+    UKF::Vector<3> x = wTl_[lighthouse_].inverse()  // world -> lighthouse
+                     * wTb                          // body -> world
+                     * bTh_[tracker_]               // head -> body
+                     * tTh_[tracker_].inverse()     // tracker -> head
+                     * sensor_;
     UKF::Vector<2> angles;
     angles[0] = std::atan2(x[0], x[2]);
     angles[1] = std::atan2(x[1], x[2]);
@@ -491,23 +502,25 @@ void CheckIfReadyToTrack() {
   }
 }
 
+// Convert an angle axis to an eigen transform
+Eigen::Affine3d AngleAxisToTransform(double data[6]) {
+  Eigen::Affine3d tf = Eigen::Affine3d::Identity();
+  tf.translation() = Eigen::Vector3d(data[0], data[1], data[2]);
+  Eigen::Vector3d v(data[3], data[4], data[5]);
+  if (v.norm() > 0) {
+    Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
+    aa.angle() = v.norm();
+    aa.axis() = v.normalized();
+    tf.linear() = aa.toRotationMatrix();
+  }
+  return tf;
+}
+
 // Called when a new lighthouse appears
 void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
   ROS_INFO_STREAM("Found lighthouse " << lighthouse->first);
-  ///////////////////////
-  // Cache a transform //
-  ///////////////////////
-  Eigen::Vector3d v;
-  Eigen::Affine3d wTl;
-  // head -> body
-  v = Eigen::Vector3d(lighthouse->second.wTl[3],
-    lighthouse->second.wTl[4], lighthouse->second.wTl[5]);
-  wTl.translation() = Eigen::Vector3d(lighthouse->second.wTl[0],
-    lighthouse->second.wTl[1], lighthouse->second.wTl[2]);
-  wTl.linear() = Eigen::AngleAxisd(v.norm(),
-    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
-  // Cache a transform
-  lTw_[lighthouse->first] = wTl.inverse();
+  // Initialize
+  wTl_[lighthouse->first] = AngleAxisToTransform(lighthouse->second.wTl);
   // Check if we have got all info from lighthouses and trackers
   CheckIfReadyToTrack();
 }
@@ -539,33 +552,10 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
   error.process_noise_covariance = Error::CovarianceMatrix::Zero();
   error.process_noise_covariance.diagonal() <<
     imu_proc_ab_, imu_proc_as_, imu_proc_gb_, imu_proc_gs_;
-  // Cache a transform //
-  Eigen::Vector3d v;
-  Eigen::Affine3d bTh, tTh, tTi;
-  // head -> body
-  v = Eigen::Vector3d(
-    tracker->second.bTh[3], tracker->second.bTh[4], tracker->second.bTh[5]);
-  bTh.translation() = Eigen::Vector3d(
-    tracker->second.bTh[0], tracker->second.bTh[1], tracker->second.bTh[2]);
-  bTh.linear() = Eigen::AngleAxisd(v.norm(),
-    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
-  // head -> light
-  v = Eigen::Vector3d(
-    tracker->second.tTh[3], tracker->second.tTh[4], tracker->second.tTh[5]);
-  tTh.translation() = Eigen::Vector3d(
-    tracker->second.tTh[0], tracker->second.tTh[1], tracker->second.tTh[2]);
-  tTh.linear() = Eigen::AngleAxisd(v.norm(),
-    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
-  // imu -> light
-  v = Eigen::Vector3d(
-    tracker->second.tTi[3], tracker->second.tTi[4], tracker->second.tTi[5]);
-  tTi.translation() =Eigen::Vector3d(
-    tracker->second.tTi[0], tracker->second.tTi[1], tracker->second.tTi[2]);
-  tTi.linear() = Eigen::AngleAxisd(v.norm(),
-    (v.norm() > 0 ? v.normalized() : Eigen::Vector3d::Zero())).toRotationMatrix();
   // Global cache
-  bTt_[tracker->first] = bTh.inverse() * tTh.inverse();
-  iTb_[tracker->first] = tTi.inverse() * tTh * bTh.inverse();
+  bTh_[tracker->first] = AngleAxisToTransform(tracker->second.bTh);
+  tTh_[tracker->first] = AngleAxisToTransform(tracker->second.tTh);
+  tTi_[tracker->first] = AngleAxisToTransform(tracker->second.tTi);
   // Check if we have got all info from lighthouses and trackers
   CheckIfReadyToTrack();
 }
