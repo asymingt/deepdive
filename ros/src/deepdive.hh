@@ -1,65 +1,110 @@
 #ifndef SRC_DEEPDIVE_HH
 #define SRC_DEEPDIVE_HH
 
-// ROS
-#include <ros/ros.h>
+// Messages
+#include <geometry_msgs/TransformStamped.h>
+#include <deepdive_ros/Lighthouses.h>
+#include <deepdive_ros/Trackers.h>
+#include <deepdive_ros/Light.h>
 
-// Types
-#include <geometry_msgs/Vector3.h>
-#include <geometry_msgs/Point.h>
-#include <geometry_msgs/Quaternion.h>
+// Eigen
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
-// Quaternion :: ROS <-> DOUBLE
+// STL
+#include <string>
+#include <map>
 
-template <typename T> inline
-void Convert(geometry_msgs::Quaternion const& from, T to[4]) {
-  to[0] = from.w;
-  to[1] = from.x;
-  to[2] = from.y;
-  to[3] = from.z;
-}
+// Universal constants
+static constexpr size_t NUM_SENSORS = 32;
 
-template <typename T> inline
-void Convert(const T from[4], geometry_msgs::Quaternion & to) {
-  to.w = from[0];
-  to.x = from[1];
-  to.y = from[2];
-  to.z = from[3];
-}
+// ESSENTIAL STRUCTURES
 
-// Vector :: ROS <-> DOUBLE
+// Lighthouse parameters
+enum Params {
+  PARAM_PHASE,
+  PARAM_TILT,
+  PARAM_GIB_PHASE,
+  PARAM_GIB_MAG,
+  PARAM_CURVE,
+  NUM_PARAMS
+};
 
-template <typename T> inline
-void Convert(geometry_msgs::Vector3 const& from, T to[3]) {
-  to[0] = from.x;
-  to[1] = from.y;
-  to[2] = from.z;
-}
+// Lighthouse parameters
+enum Errors {
+  ERROR_GYR_BIAS,
+  ERROR_GYR_SCALE,
+  ERROR_ACC_BIAS,
+  ERROR_ACC_SCALE,
+  NUM_ERRORS
+};
 
-template <typename T> inline
-void Convert(const T from[3], geometry_msgs::Vector3 & to) {
-  to.x = from[0];
-  to.y = from[1];
-  to.z = from[2];
-}
+enum Motors {
+  MOTOR_VERTICAL,
+  MOTOR_HORIZONTAL,
+  NUM_MOTORS
+};
 
-// Point :: ROS <-> DOUBLE
+// Lighthouse data structure
+struct Lighthouse {
+  double wTl[6];
+  double params[NUM_MOTORS][NUM_PARAMS];
+  bool ready;
+};
+typedef std::map<std::string, Lighthouse> LighthouseMap;
 
-template <typename T> inline
-void Convert(geometry_msgs::Point const& from, T to[3]) {
-  to[0] = from.x;
-  to[1] = from.y;
-  to[2] = from.z;
-}
+// Tracker data structure
+struct Tracker {
+  double bTh[6];
+  double tTh[6];
+  double tTi[6];
+  double sensors[NUM_SENSORS*6];
+  double errors[NUM_ERRORS][3];
+  bool ready;
+};
+typedef std::map<std::string, Tracker> TrackerMap;
 
-template <typename T> inline
-void Convert(const T from[3], geometry_msgs::Point & to) {
-  to.x = from[0];
-  to.y = from[1];
-  to.z = from[2];
-}
+// Pulse measurements
+struct Measurement {
+  double wTb[6];
+  deepdive_ros::Light light;
+};
+typedef std::map<ros::Time, Measurement> MeasurementMap;
 
-// Recursively calculates mean and standar deviation
+// Correction data structure
+typedef std::map<ros::Time, geometry_msgs::TransformStamped> CorrectionMap;
+
+// TRANSFORM ENGINE
+
+void SendStaticTransform(geometry_msgs::TransformStamped const& tfs);
+
+void SendDynamicTransform(geometry_msgs::TransformStamped const& tfs);
+
+void SendTransforms(
+  std::string const& frame_parent, std::string const& frame_child,
+  LighthouseMap const& lighthouses, TrackerMap const& trackers);
+
+// CONFIG MANAGEMENT
+
+// Parse a human-readable configuration
+bool ReadConfig(std::string const& calfile,
+  LighthouseMap & lighthouses, TrackerMap & trackers);
+
+// Write a human-readable configuration
+bool WriteConfig(std::string const& calfile,
+  std::string const& parent_frame, std::string const& child_frame,
+    LighthouseMap const& lighthouses, TrackerMap const& trackers);
+
+// REUSABLE CALLS
+
+void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg,
+  LighthouseMap & lighthouses, std::function<void(LighthouseMap::iterator)> cb);
+
+void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
+  TrackerMap & trackers, std::function<void(TrackerMap::iterator)> cb);
+
+// RUNTIME STATISTICS
+
 class Statistics {
  public:
   // Constructor and initialization
@@ -97,6 +142,5 @@ class Statistics {
   double mean_;
 };
 
-
-
 #endif
+

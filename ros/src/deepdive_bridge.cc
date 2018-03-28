@@ -8,15 +8,14 @@ extern "C" {
   #include <deepdive/deepdive.h>
 }
 
-// Utility functions
-#include <deepdive.hh>
-
 // ROS includes
 #include <ros/ros.h>
 
 // Standard messages
 #include <sensor_msgs/Imu.h>
 #include <geometry_msgs/Vector3.h>
+#include <geometry_msgs/Quaternion.h>
+#include <geometry_msgs/Point.h>
 
 // Non-standard messages
 #include <deepdive_ros/Button.h>
@@ -42,47 +41,70 @@ static constexpr double SWEEP_DURATION  = 400000.0;
 static constexpr double SWEEP_CENTER    = 200000.0;
 static constexpr double TICKS_PER_SEC   = 48e6;
 
-// Data structures for storing lighthouses and trackers
-std::map<std::string, deepdive_ros::Lighthouse> lighthouses_;
-std::map<std::string, deepdive_ros::Tracker> trackers_;
- 
-// Create data publishers
-ros::Publisher pub_lighthouses_;
-ros::Publisher pub_trackers_;
-ros::Publisher pub_button_;
-ros::Publisher pub_light_;
-ros::Publisher pub_imu_;
+// DATA STRUCTURES
 
-// Convert time an return overflow count - this is an okay way of extracting
-// an accurate time in seconds. However, it assigns an arbitrary time to the
-// data, which makes it inherently incompatible with other ROS packages.
-ros::Time TimeConvert(std::string const& serial, uint32_t timecode) {
-  // How many seconds in each overflow cycle of the counter
-  static uint32_t ticks_per_period = std::numeric_limits<uint32_t>::max();
-  // If we can't find the tracker we initialize its cycle counter
-  if (trackers_.find(serial) == trackers_.end()) {
-    trackers_[serial].lastcount = 0;
-    trackers_[serial].overflows = 1;
-  }
-  // In most cases we will be in the same cycle as the overflow. However,
-  // these two lines advance and pull back the overflow to take care of the
-  // fact that there is a bad time-ordering of packets
-  if (timecode > trackers_[serial].lastcount &&
-      timecode - trackers_[serial].lastcount > ticks_per_period / 2)
-      trackers_[serial].overflows--;
-  if (trackers_[serial].lastcount > timecode &&
-      trackers_[serial].lastcount - timecode > ticks_per_period / 2)
-      trackers_[serial].overflows++;
-  trackers_[serial].lastcount = timecode;
-  // Calculate the time based on the number of overflows and the timecode
-  uint64_t tick = static_cast<uint64_t>(trackers_[serial].overflows)
-                * static_cast<uint64_t>(ticks_per_period)
-                + static_cast<uint64_t>(timecode);
-  int32_t secs = static_cast<int32_t>(tick / 48000000ULL);
-  int32_t nsec = static_cast<int32_t>((tick % 48000000ULL) * 1000 / 48);
-  // Add the tick store to the time code and convert to seconds
-  return ros::Time(secs, nsec);
+// Data structures for storing lighthouses and trackers
+static std::map<std::string, deepdive_ros::Lighthouse> lighthouses_;
+static std::map<std::string, deepdive_ros::Tracker> trackers_;
+
+// Create data publishers
+static ros::Publisher pub_lighthouses_;
+static ros::Publisher pub_trackers_;
+static ros::Publisher pub_button_;
+static ros::Publisher pub_light_;
+static ros::Publisher pub_imu_;
+
+// Quaternion :: ROS <-> DOUBLE
+
+template <typename T> inline
+void Convert(geometry_msgs::Quaternion const& from, T to[4]) {
+  to[0] = from.w;
+  to[1] = from.x;
+  to[2] = from.y;
+  to[3] = from.z;
 }
+
+template <typename T> inline
+void Convert(const T from[4], geometry_msgs::Quaternion & to) {
+  to.w = from[0];
+  to.x = from[1];
+  to.y = from[2];
+  to.z = from[3];
+}
+
+// Vector :: ROS <-> DOUBLE
+
+template <typename T> inline
+void Convert(geometry_msgs::Vector3 const& from, T to[3]) {
+  to[0] = from.x;
+  to[1] = from.y;
+  to[2] = from.z;
+}
+
+template <typename T> inline
+void Convert(const T from[3], geometry_msgs::Vector3 & to) {
+  to.x = from[0];
+  to.y = from[1];
+  to.z = from[2];
+}
+
+// Point :: ROS <-> DOUBLE
+
+template <typename T> inline
+void Convert(geometry_msgs::Point const& from, T to[3]) {
+  to[0] = from.x;
+  to[1] = from.y;
+  to[2] = from.z;
+}
+
+template <typename T> inline
+void Convert(const T from[3], geometry_msgs::Point & to) {
+  to.x = from[0];
+  to.y = from[1];
+  to.z = from[2];
+}
+
+// CALLBACKS
 
 // Callback to display light info
 void LightCallback(struct Tracker * tracker,
