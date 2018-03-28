@@ -70,7 +70,7 @@ force2d:            true
 # What else to refine, besides the lighthouse ans sensor positions
 refine:
   lighthouses:      true       # Refine lighthouse positions
-  trajectory:       false      # If false we will use the corrections
+  trajectory:       true       # If false we will use the corrections
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
@@ -80,7 +80,7 @@ refine:
 weight:
   light:            1.0
   correction:       1.0
-  motion:           100.0
+  motion:           1.0
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
