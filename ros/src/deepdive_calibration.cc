@@ -364,10 +364,10 @@ bool Solve() {
       reinterpret_cast<double*>(tracker.tTh),
       reinterpret_cast<double*>(tracker.sensors),
       reinterpret_cast<double*>(lighthouse.params[axis]));
-    // If we are refining the trajectory we need to add a correction
+    // THIS CODE BELOW IS CHEATING. DON"T ENABLE IT AGAIN.
+    /*
     if (refine_trajectory_) {
       // Add the correction
-      /*
       ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
         CorrectionCost, 6, 2, 1, 2, 1>(new CorrectionCost(wTb[kt->first]));
       problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
@@ -375,7 +375,6 @@ bool Solve() {
         reinterpret_cast<double*>(&wTb[kt->first][2]),    // pos: z
         reinterpret_cast<double*>(&wTb[kt->first][3]),    // rot: xy
         reinterpret_cast<double*>(&wTb[kt->first][5]));   // rot: z
-      */
       // Add the motion cost
       if (kt_p != corrections_.end()) {
         ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
@@ -391,6 +390,7 @@ bool Solve() {
         reinterpret_cast<double*>(&wTb[kt->first][5]));   // rot: z
       }
     }
+    */
     // Set the kt_p
     kt_p = kt;
   }
