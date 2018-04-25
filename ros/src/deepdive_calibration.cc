@@ -41,27 +41,20 @@
 // GLOBAL PARAMETERS
 
 // List of lighthouses
-LighthouseMap lighthouses_;
 TrackerMap trackers_;
+LighthouseMap lighthouses_;
 MeasurementMap measurements_;
-CorrectionMap corrections_;
 
 // Global strings
 std::string calfile_ = "deepdive.tf2";
-std::string frame_parent_ = "world";
-std::string frame_child_ = "truth";
-std::string frame_estimate_ = "body";
+std::string frame_world_ = "world";
+std::string frame_vive_ = "vive";
+std::string frame_body_ = "truth";
 
 // Whether to apply corrections
 bool correct_ = false;
 
-// Reesolution of the pose graph
-double resolution_ = 0.1;
-
 // What to solve for
-bool refine_lighthouses_ = true;
-bool refine_trajectory_ = false;
-bool refine_extrinsics_ = false;
 bool refine_sensors_ = false;
 bool refine_head_ = false;
 bool refine_params_ = false;
@@ -70,11 +63,9 @@ bool refine_params_ = false;
 int thresh_count_ = 4;
 double thresh_angle_ = 60.0;
 double thresh_duration_ = 1.0;
-double thresh_correction_ = 0.1;
 
 // What to weight motion cost relative to the other errors
 double weight_light_ = 1.0;
-double weight_correction_ = 1.0;
 double weight_motion_ = 100.0;
 
 // Solver parameters
@@ -89,19 +80,12 @@ bool visualize_ = true;
 // Are we recording right now?
 bool recording_ = false;
 
-// Force the body frame to move on a plane
-bool force2d_ = false;
-
-// Force the body frame to be static
-bool static_ = false;
-
-// Static pose
-double pose_[6];
+// World -> vive registatration
+double registration_[6];
 
 // Sensor visualization publisher
-ros::Publisher pub_sensors_;
-ros::Publisher pub_path_;
-ros::Publisher pub_corr_;
+std::map<std::string, ros::Publisher> pub_sensors_;
+std::map<std::string, ros::Publisher> pub_path_;
 
 // Timer for managing offline
 ros::Timer timer_;
@@ -136,25 +120,13 @@ struct LightCost {
   explicit LightCost(deepdive_ros::Light const& light) : light_(light) {}
   // Called by ceres-solver to calculate error
   template <typename T>
-  bool operator()(const T* const wTl,         // Lighthouse -> world
-                  const T* const wTb_pos_xy,  // Body -> world (pos xy)
-                  const T* const wTb_pos_z,   // Body -> world (pos z)
-                  const T* const wTb_rot_xy,  // Body -> world (rot xy)
-                  const T* const wTb_rot_z,   // Body -> world (rot z)
-                  const T* const bTh,         // Head -> body
-                  const T* const tTh,         // Head -> tracking (light)
+  bool operator()(const T* const vTl,         // Lighthouse -> vive
+                  const T* const vTt,         // Tracking -> vive
                   const T* const sensors,     // Lighthouse calibration
                   const T* const params,      // Tracker extrinsics
                   T* residual) const {
     // The position of the sensor
-    T x[3], angle[2], wTb[6];
-    // Reconstruct a transform from the components
-    wTb[0] = wTb_pos_xy[0];
-    wTb[1] = wTb_pos_xy[1];
-    wTb[2] = wTb_pos_z[0];
-    wTb[3] = wTb_rot_xy[0];
-    wTb[4] = wTb_rot_xy[1];
-    wTb[5] = wTb_rot_z[0];
+    T x[3], angle[2];
     // Get the light axis
     size_t a = light_.axis;
     // Iterate over all measurements
@@ -166,10 +138,8 @@ struct LightCost {
       x[1] = sensors[6*s+1];
       x[2] = sensors[6*s+2];
       // Project the sensor position into the lighthouse frame
-      InverseTransformInPlace(tTh, x);    // light -> head
-      TransformInPlace(bTh, x);           // head -> body
-      TransformInPlace(wTb, x);           // body -> world
-      InverseTransformInPlace(wTl, x);    // world -> lighthouse
+      TransformInPlace(vTt, x);           // tracking -> vive
+      InverseTransformInPlace(vTl, x);    // vive -> lighthouse
       // Predict the angles
       angle[0] = atan2(x[0], x[2]);
       angle[1] = atan2(x[1], x[2]);
@@ -185,11 +155,8 @@ struct LightCost {
                      * cos(angle[1-a] + T(params[PARAM_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
-      residual[i] = angle[a] - T(light_.pulses[i].angle);
+      residual[i] = T(weight_light_) * (angle[a] - T(light_.pulses[i].angle));
     }
-    // Weight
-    for (size_t i = 0; i < light_.pulses.size(); i++)
-      residual[i] *= T(weight_light_);
     // Everything went well
     return true;
   }
@@ -203,23 +170,11 @@ struct MotionCost {
   explicit MotionCost() {}
   // Called by ceres-solver to calculate error
   template <typename T>
-  bool operator()(const T* const prev_pos_xy,  // PREV Body -> world (pos xy)
-                  const T* const prev_pos_z,   // PREV Body -> world (pos z)
-                  const T* const prev_rot_xy,  // PREV Body -> world (rot xy)
-                  const T* const prev_rot_z,   // PREV Body -> world (rot z)
-                  const T* const next_pos_xy,  // NEXT Body -> world (pos xy)
-                  const T* const next_pos_z,   // NEXT Body -> world (pos z)
-                  const T* const next_rot_xy,  // NEXT Body -> world (rot xy)
-                  const T* const next_rot_z,   // NEXT Body -> world (rot z)
+  bool operator()(const T* const prev_vTt,   // PREV Body -> world (pos xy)
+                  const T* const next_vTt,   // NEXT Body -> world (rot z)
                   T* residual) const {
-    residual[0] =  prev_pos_xy[0] - next_pos_xy[0];
-    residual[1] =  prev_pos_xy[1] - next_pos_xy[1];
-    residual[2] =  prev_pos_z[0] - next_pos_z[0];
-    residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
-    residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
-    residual[5] =  prev_rot_z[0] - next_rot_z[0];
     for (size_t i = 0; i < 6; i++)
-      residual[i] *= T(weight_motion_);
+      residual[i] = T(weight_motion_) * (next_vTt[i] - prev_vTt[i]);
     return true;
   }
 };
@@ -242,57 +197,56 @@ bool Solve() {
       << measurements_.rbegin()->first);
   }
 
-  // Store the transforms
-  std::map<ros::Time, double[6]> wTb;
+  // Clear all trajectories
+  {
+    ROS_INFO("Clearing all existing trajectories.");
+    TrackerMap::iterator jt;
+    for (jt = trackers_.begin(); jt != trackers_.end(); jt++)
+      jt->second.vTt.clear();
+  }
+
+  // Keep a log of the data used
   std::map<std::string, size_t> l_tally;
   std::map<std::string, size_t> t_tally;
 
   // Create a correction if required
-  MeasurementMap::iterator mt;
-  for (mt = measurements_.begin(); mt != measurements_.end(); mt++) {
-    // Get an index for the current measurement
-    ros::Time idx = (static_ ? ros::Time(0) : mt->first);
-    for (size_t i = 0; i < 6; i++)
-      wTb[idx][i] = pose_[i];
-    // Get references to the lighthouse, tracker and axis
-    Tracker & tracker = trackers_[mt->second.light.header.frame_id];
-    Lighthouse & lighthouse = lighthouses_[mt->second.light.lighthouse];
-    size_t const& axis = mt->second.light.axis;
-    // Register that we have received from this lighthouse and tracker
-    l_tally[mt->second.light.lighthouse]++;
-    t_tally[mt->second.light.header.frame_id]++;
-    // Create a cost function
-    ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<LightCost,
-      ceres::DYNAMIC, 6, 2, 1, 2, 1, 6, 6, NUM_SENSORS * 6, NUM_PARAMS>(
-        new LightCost(mt->second.light), mt->second.light.pulses.size());
-    // Add a residual block
-    problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-      reinterpret_cast<double*>(lighthouse.wTl),
-      reinterpret_cast<double*>(&wTb[idx][0]),  // pos: xy
-      reinterpret_cast<double*>(&wTb[idx][2]),  // pos: z
-      reinterpret_cast<double*>(&wTb[idx][3]),  // rot: xy
-      reinterpret_cast<double*>(&wTb[idx][5]),  // rot: z
-      reinterpret_cast<double*>(tracker.bTh),
-      reinterpret_cast<double*>(tracker.tTh),
-      reinterpret_cast<double*>(tracker.sensors),
-      reinterpret_cast<double*>(lighthouse.params[axis]));
-    // If we are dynamic and there
-    if (!static_ && mt != measurements_.begin()) {
-      // Get an index for the previous measurement
-      ros::Time pdx = std::prev(mt)->first;
-      // Create a cost function to represent motion
-      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-            <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
-      // Add a residual block for error
+  {
+    ROS_INFO("Adding measurements.");
+    MeasurementMap::iterator mt;
+    for (mt = measurements_.begin(); mt != measurements_.end(); mt++) {
+      // Get references to the lighthouse, tracker and axis
+      Tracker & tracker = trackers_[mt->second.light.header.frame_id];
+      Lighthouse & lighthouse = lighthouses_[mt->second.light.lighthouse];
+      size_t const& axis = mt->second.light.axis;
+      // Register that we have received from this lighthouse and tracker
+      l_tally[mt->second.light.lighthouse]++;
+      t_tally[mt->second.light.header.frame_id]++;
+      // This only works because the measurement time is monotonically
+      for (size_t i = 0; i < 6; i++)
+        tracker.vTt[mt->first][i] = 0.0;
+      std::map<ros::Time, double[6]>::iterator vTt_c = std::prev(tracker.vTt.end());
+      std::map<ros::Time, double[6]>::iterator vTt_p = std::prev(vTt_c);
+      // Create a cost function
+      ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<LightCost,
+        ceres::DYNAMIC, 6, 6, NUM_SENSORS * 6, NUM_PARAMS>(
+          new LightCost(mt->second.light), mt->second.light.pulses.size());
+      // Add a residual block
       problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-        reinterpret_cast<double*>(&wTb[pdx][0]),  // pos: xy
-        reinterpret_cast<double*>(&wTb[pdx][2]),  // pos: z
-        reinterpret_cast<double*>(&wTb[pdx][3]),  // rot: xy
-        reinterpret_cast<double*>(&wTb[pdx][5]),  // rot: z
-        reinterpret_cast<double*>(&wTb[idx][0]),    // pos: xy
-        reinterpret_cast<double*>(&wTb[idx][2]),    // pos: z
-        reinterpret_cast<double*>(&wTb[idx][3]),    // rot: xy
-        reinterpret_cast<double*>(&wTb[idx][5]));   // rot: z
+        reinterpret_cast<double*>(lighthouse.vTl),
+        reinterpret_cast<double*>(vTt_c->second),
+        reinterpret_cast<double*>(tracker.sensors),
+        reinterpret_cast<double*>(lighthouse.params[axis]));
+      // If we are dynamic and there
+      if (vTt_p != tracker.vTt.end()) {
+
+        // Create a cost function to represent motion
+        ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+              <MotionCost, 6, 6, 6>(new MotionCost());
+        // Add a residual block for error
+        problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+          reinterpret_cast<double*>(vTt_p->second),
+          reinterpret_cast<double*>(vTt_c->second));
+      }
     }
   }
 
@@ -315,166 +269,97 @@ bool Solve() {
     }
   }
 
-  // If we want the trajectory refined at the same time as the lighthouse
-  // positions. This is completely optional
-  if (refine_trajectory_) {
-    // In 2D mode we lock the roll and pitch to zero and the height to some
-    // fixed value. If we had no corrections the height is zero, otherwise
-    // we take the  mean height over all correction values 
-    if (force2d_) {
-      ROS_INFO_STREAM("Trajectory refined in 2D with fixed height");
-      std::map<ros::Time, double[6]>::iterator it;
-      for (it = wTb.begin(); it != wTb.end(); it++) {
-        it->second[2] = pose_[2];   // Height
-        problem.SetParameterBlockConstant(&it->second[2]);
-        it->second[3] = 0.0;      // Roll
-        it->second[4] = 0.0;      // Pitch
-        problem.SetParameterBlockConstant(&it->second[3]);
+  // Set the lighthouse -> vive transform for the first lighthouse to be
+  // the identity, and optionally allow other things to be refined.
+  {
+    ROS_INFO_STREAM("Setting blocks constant if necessary");
+    LighthouseMap::iterator it;
+    for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) {
+      if (it == lighthouses_.begin()) {
+        for (size_t i = 0; i < 6; i++)
+          it->second.vTl[0] = 0;
+        problem.SetParameterBlockConstant(it->second.vTl);
       }
-    } else {
-      ROS_INFO("Trajectory refined in 3D");
+      if (!refine_params_) {
+        for (size_t i = 0; i < NUM_MOTORS; i++) {
+          problem.SetParameterBlockConstant(it->second.params[i]);
+        }
+      }
     }
-  } else {
-    ROS_INFO("Trajectory not refined");
-    std::map<ros::Time, double[6]>::iterator it;
-    for (it = wTb.begin(); it != wTb.end(); it++) {
-      problem.SetParameterBlockConstant(&it->second[0]);
-      problem.SetParameterBlockConstant(&it->second[2]);
-      problem.SetParameterBlockConstant(&it->second[3]);
-      problem.SetParameterBlockConstant(&it->second[5]);
+    TrackerMap::iterator jt;
+    for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
+      if (!refine_head_) {
+        problem.SetParameterBlockConstant(jt->second.tTh);
+      }
+      if (!refine_sensors_) {
+        problem.SetParameterBlockConstant(jt->second.sensors);
+      }
     }
   }
 
-  // Make a subset of parameter blocks constant if we don't want to refine
-  LighthouseMap::iterator it;
-  for (it = lighthouses_.begin(); it != lighthouses_.end(); it++) {
-    if (!refine_lighthouses_)
-      problem.SetParameterBlockConstant(it->second.wTl);
-    if (!refine_params_)
-      for (size_t i = 0; i < NUM_MOTORS; i++)
-        problem.SetParameterBlockConstant(it->second.params[i]);
-  }
-  TrackerMap::iterator jt;
-  for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
-    if (!refine_extrinsics_)
-      problem.SetParameterBlockConstant(jt->second.bTh);
-    if (!refine_head_)
-      problem.SetParameterBlockConstant(jt->second.tTh);
-    if (!refine_sensors_)
-      problem.SetParameterBlockConstant(jt->second.sensors);
-  }
-
-  // Get a solution
-  ceres::Solver::Summary summary;
-  ceres::Solve(options_, &problem, &summary);
-  if (summary.IsSolutionUsable()) {
-    // Print summary of important measurements
-    ROS_INFO("Usable solution found.");
-    LighthouseMap::iterator it, jt;
-    for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
-      for (jt = std::next(it); jt != lighthouses_.end(); jt++)  {
-        double dl = 0;
-        for (size_t i = 0; i < 3; i++) {
-          dl += (it->second.wTl[i] - jt->second.wTl[i]) *
-                (it->second.wTl[i] - jt->second.wTl[i]);
-        }
-        ROS_INFO_STREAM("Distance between lighthouses " << it->first
-          << " and " << jt->first << " is " << sqrt(dl) << " meters");
-      }
-    }
-    // Publish the new solution
-    SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
-    // Write the solution to a config file
-    if (WriteConfig(calfile_, frame_parent_, frame_child_,
-      lighthouses_, trackers_))
-      ROS_INFO_STREAM("Calibration written to " << calfile_);
-    else
-      ROS_INFO_STREAM("Could not write calibration to" << calfile_);
-    //
-    if (refine_trajectory_) {
-      ROS_INFO_STREAM("You requested tracjectory refining" << calfile_);
-      std::ofstream outfile;
-      outfile.open ("statistics.csv");
-      std::map<ros::Time, double[6]>::iterator it;
-      for (it = wTb.begin(); it != wTb.end(); it++) {
-        geometry_msgs::TransformStamped & tfs = corrections_[it->first];
-        Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
-        Eigen::AngleAxisd aa;
-        if (v.norm() > 0) {
-          aa.angle() = v.norm();
-          aa.axis() = v.normalized();
-        }
-        Eigen::Quaterniond q(aa);
-        outfile << (it->first - wTb.begin()->first).toSec() << ", "
-                << it->second[0] << ", "
-                << it->second[1] << ", "
-                << it->second[2] << ", "
-                << q.w() << ", "
-                << q.x() << ", "
-                << q.y() << ", "
-                << q.z() << ", "
-                << tfs.transform.translation.x << ", "
-                << tfs.transform.translation.y << ", "
-                << tfs.transform.translation.z << ", "
-                << tfs.transform.rotation.w << ", "
-                << tfs.transform.rotation.x << ", "
-                << tfs.transform.rotation.y << ", "
-                << tfs.transform.rotation.z << std::endl;
-      }
-      outfile.close();
-    }
-    // Print the trajectory of the body-frame in the world-frame
-    if (visualize_) {
-      // Publish path
-      {
-        nav_msgs::Path msg;
-        msg.header.stamp = ros::Time::now();
-        msg.header.frame_id = "world";
-        std::map<ros::Time, double[6]>::iterator it;
-        for (it = wTb.begin(); it != wTb.end(); it++) {
-          geometry_msgs::PoseStamped ps;
-          Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
-          Eigen::AngleAxisd aa;
-          if (v.norm() > 0) {
-            aa.angle() = v.norm();
-            aa.axis() = v.normalized();
+  // Attempt to find a solution
+  {
+    ROS_INFO_STREAM("Attempting to solve problem");
+    ceres::Solver::Summary summary;
+    ceres::Solve(options_, &problem, &summary);
+    if (summary.IsSolutionUsable()) {
+      // Print summary of important measurements
+      ROS_INFO("Usable solution found.");
+      LighthouseMap::iterator it, jt;
+      for (it = lighthouses_.begin(); it != lighthouses_.end(); it++)  {
+        for (jt = std::next(it); jt != lighthouses_.end(); jt++)  {
+          double dl = 0;
+          for (size_t i = 0; i < 3; i++) {
+            dl += (it->second.vTl[i] - jt->second.vTl[i]) *
+                  (it->second.vTl[i] - jt->second.vTl[i]);
           }
-          Eigen::Quaterniond q(aa);
-          ps.header.stamp = it->first;
-          ps.header.frame_id = "world";
-          ps.pose.position.x = it->second[0];
-          ps.pose.position.y = it->second[1];
-          ps.pose.position.z = it->second[2];
-          ps.pose.orientation.w = q.w();
-          ps.pose.orientation.x = q.x();
-          ps.pose.orientation.y = q.y();
-          ps.pose.orientation.z = q.z();
-          msg.poses.push_back(ps);
+          ROS_INFO_STREAM("Distance between lighthouses " << it->first
+            << " and " << jt->first << " is " << sqrt(dl) << " meters");
         }
-        pub_path_.publish(msg);
       }
-      // Publish corrections
-      {
-        nav_msgs::Path msg;
-        msg.header.stamp = ros::Time::now();
-        msg.header.frame_id = "world";
-        std::map<ros::Time, double[6]>::iterator it;
-        for (it = wTb.begin(); it != wTb.end(); it++) {
-          geometry_msgs::TransformStamped & tfs = corrections_[it->first];
-          geometry_msgs::PoseStamped ps;
-          ps.header.stamp = it->first;
-          ps.header.frame_id = "world";
-          ps.pose.position.x = tfs.transform.translation.x;
-          ps.pose.position.y = tfs.transform.translation.y;
-          ps.pose.position.z = tfs.transform.translation.z;
-          ps.pose.orientation = tfs.transform.rotation;
-          msg.poses.push_back(ps);
+      // Publish the new solution
+      SendTransforms(frame_world_, frame_vive_, frame_body_,
+        registration_, lighthouses_, trackers_);
+      // Write the solution to a config file
+      if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
+        registration_, lighthouses_, trackers_))
+        ROS_INFO_STREAM("Calibration written to " << calfile_);
+      else
+        ROS_INFO_STREAM("Could not write calibration to" << calfile_);
+      // Print the trajectory of the body-frame in the world-frame
+      if (visualize_) {
+        TrackerMap::iterator jt;
+        for (jt = trackers_.begin(); jt != trackers_.end(); jt++) {
+          nav_msgs::Path msg;
+          msg.header.stamp = ros::Time::now();
+          msg.header.frame_id = frame_vive_;
+          std::map<ros::Time, double[6]>::iterator it;
+          for (it = jt->second.vTt.begin(); it != jt->second.vTt.end(); it++) {
+            geometry_msgs::PoseStamped ps;
+            Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
+            Eigen::AngleAxisd aa;
+            if (v.norm() > 0) {
+              aa.angle() = v.norm();
+              aa.axis() = v.normalized();
+            }
+            Eigen::Quaterniond q(aa);
+            ps.header.stamp = it->first;
+            ps.header.frame_id = frame_vive_;
+            ps.pose.position.x = it->second[0];
+            ps.pose.position.y = it->second[1];
+            ps.pose.position.z = it->second[2];
+            ps.pose.orientation.w = q.w();
+            ps.pose.orientation.x = q.x();
+            ps.pose.orientation.y = q.y();
+            ps.pose.orientation.z = q.z();
+            msg.poses.push_back(ps);
+          }
+          pub_path_[jt->first].publish(msg);
         }
-        pub_corr_.publish(msg);
       }
+      // Solution is usable
+      return true;
     }
-    // Solution is usable
-    return true;
   }
   ROS_INFO("Solution is not usable.");
   // Solution is not usable
@@ -510,19 +395,6 @@ void LightCallback(deepdive_ros::Light::ConstPtr const& msg) {
   measurements_[ros::Time::now()].light = data;
 }
 
-void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
-  // Check that we are recording and that the tracker/lighthouse is ready
-  if (!recording_)
-    return;
-  std::vector<geometry_msgs::TransformStamped>::const_iterator it;
-  for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
-    if (it->header.frame_id == frame_parent_ &&
-        it->child_frame_id == frame_estimate_) {
-      corrections_[ros::Time::now()] = *it;
-    }
-  }
-}
-
 bool TriggerCallback(std_srvs::Trigger::Request  &req,
                      std_srvs::Trigger::Response &res)
 {
@@ -539,7 +411,6 @@ bool TriggerCallback(std_srvs::Trigger::Request  &req,
       res.message = "Recording stopped. Solution not found.";
     // Clear all the data and corrections
     measurements_.clear();
-    corrections_.clear();
   }
   // Toggle recording state
   recording_ = !recording_;
@@ -565,8 +436,7 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
   if (visualize_) {
     visualization_msgs::MarkerArray msg;
     std::map<std::string, Tracker>::iterator jt;
-    size_t n = 0;
-    for (jt = trackers_.begin(); jt != trackers_.end(); jt++, n++)  {
+    for (jt = trackers_.begin(); jt != trackers_.end(); jt++)  {
       for (uint16_t i = 0; i < NUM_SENSORS; i++) {
         // All this code just to convert a normal to a quaternion
         Eigen::Vector3d vfwd(jt->second.sensors[6*i+3],
@@ -583,11 +453,11 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
                  vfwd.z(), vright.z(), vdown.z();
           Eigen::Quaterniond q(dcm);
           // Now plot an arrow representing the normal
-          static visualization_msgs::Marker marker;
+          visualization_msgs::Marker marker;
           marker.header.frame_id = jt->first + "/light";
           marker.header.stamp = ros::Time::now();
-          marker.ns = "sensors";
-          marker.id = NUM_SENSORS * n + i;
+          marker.ns = jt->first;
+          marker.id = i;
           marker.type = visualization_msgs::Marker::ARROW;
           marker.action = visualization_msgs::Marker::ADD;
           marker.pose.position.x = jt->second.sensors[6*i+0];
@@ -607,8 +477,8 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
           msg.markers.push_back(marker);
         }
       }
+      pub_sensors_[tracker->first].publish(msg);
     }
-    pub_sensors_.publish(msg);
   }
 }
 
@@ -629,21 +499,21 @@ int main(int argc, char **argv) {
     recording_ = true;
   }
 
+  // Reset the registration information
+  for (size_t i = 0; i < 6; i++)
+    registration_[i] = 0;
+
   // Get the parent information
   if (!nh.getParam("calfile", calfile_))
     ROS_FATAL("Failed to get the calfile file.");
 
   // Get some global information
-  if (!nh.getParam("frames/parent", frame_parent_))
-    ROS_FATAL("Failed to get frames/parent parameter.");
-  if (!nh.getParam("frames/child", frame_child_))
-    ROS_FATAL("Failed to get frames/child parameter.");  
-  if (!nh.getParam("frames/estimate", frame_estimate_))
-    ROS_FATAL("Failed to get frames/estimate parameter.");  
-
-  // Get the pose graph resolution
-  if (!nh.getParam("resolution", resolution_))
-    ROS_FATAL("Failed to get resolution parameter.");
+  if (!nh.getParam("frames/world", frame_world_))
+    ROS_FATAL("Failed to get frames/world parameter.");  
+  if (!nh.getParam("frames/vive", frame_vive_))
+    ROS_FATAL("Failed to get frames/vive parameter.");  
+  if (!nh.getParam("frames/body", frame_body_))
+    ROS_FATAL("Failed to get frames/body parameter.");  
 
   // Get the thresholds
   if (!nh.getParam("thresholds/count", thresh_count_))
@@ -652,16 +522,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get thresholds/angle parameter.");
   if (!nh.getParam("thresholds/duration", thresh_duration_))
     ROS_FATAL("Failed to get thresholds/duration parameter.");
-  if (!nh.getParam("thresholds/correction", thresh_correction_))
-    ROS_FATAL("Failed to get thresholds/correction parameter.");
 
   // What to refine
-  if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
-    ROS_FATAL("Failed to get refine/lighthouses parameter.");
-  if (!nh.getParam("refine/trajectory", refine_trajectory_))
-    ROS_FATAL("Failed to get refine/trajectory parameter.");
-  if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
-    ROS_FATAL("Failed to get refine/extrinsics parameter.");
   if (!nh.getParam("refine/sensors", refine_sensors_))
     ROS_FATAL("Failed to get refine/sensors parameter.");
   if (!nh.getParam("refine/head", refine_head_))
@@ -672,8 +534,6 @@ int main(int argc, char **argv) {
   // What weights to use
   if (!nh.getParam("weight/light", weight_light_))
     ROS_FATAL("Failed to get weight/light parameter.");
-  if (!nh.getParam("weight/correction", weight_correction_))
-    ROS_FATAL("Failed to get weight/correction parameter.");
   if (!nh.getParam("weight/motion", weight_motion_))
     ROS_FATAL("Failed to get weight/motion parameter.");
 
@@ -683,33 +543,9 @@ int main(int argc, char **argv) {
   if (!correct_)
     refine_params_ = false;
 
-  // Whether to apply light corrections
-  if (!nh.getParam("force2d", force2d_))
-    ROS_FATAL("Failed to get force2d parameter.");
-
-  // Whether to apply light corrections
-  if (!nh.getParam("static", static_))
-    ROS_FATAL("Failed to get static parameter.");
-
-  // Get the default pose
-  std::vector<double> pose;
-  if (!nh.getParam("pose", pose))
-    ROS_FATAL("Failed to get the tracker transform.");
-  if (pose.size() != 7)
-    ROS_FATAL("Failed to parse tracker transform.");
-  Eigen::Quaterniond q(pose[6], pose[3], pose[4], pose[5]);
-  Eigen::AngleAxisd aa(q);
-  pose_[0] = pose[0];
-  pose_[1] = pose[1];
-  pose_[2] = pose[2];
-  pose_[3] = aa.angle() * aa.axis()[0];
-  pose_[4] = aa.angle() * aa.axis()[1];
-  pose_[5] = aa.angle() * aa.axis()[2];
-
   // Define the ceres problem
   ceres::Solver::Options options;
   options_.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  options_.function_tolerance = 1e-12;
   if (!nh.getParam("solver/max_time", options_.max_solver_time_in_seconds))
     ROS_FATAL("Failed to get the solver/max_time parameter.");
   if (!nh.getParam("solver/max_iterations", options_.max_num_iterations))
@@ -739,18 +575,14 @@ int main(int argc, char **argv) {
       ROS_FATAL("Failed to parse lighthouse transform.");
       continue;
     }
-    Eigen::Quaterniond q(
-      transform[6],  // qw
-      transform[3],  // qx
-      transform[4],  // qy
-      transform[5]); // qz
+    Eigen::Quaterniond q(transform[6], transform[3], transform[4], transform[5]);
     Eigen::AngleAxisd aa(q);
-    lighthouses_[serial].wTl[0] = transform[0];
-    lighthouses_[serial].wTl[1] = transform[1];
-    lighthouses_[serial].wTl[2] = transform[2];
-    lighthouses_[serial].wTl[3] = aa.angle() * aa.axis()[0];
-    lighthouses_[serial].wTl[4] = aa.angle() * aa.axis()[1];
-    lighthouses_[serial].wTl[5] = aa.angle() * aa.axis()[2];
+    lighthouses_[serial].vTl[0] = transform[0];
+    lighthouses_[serial].vTl[1] = transform[1];
+    lighthouses_[serial].vTl[2] = transform[2];
+    lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
+    lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
+    lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
     lighthouses_[serial].ready = false;
   }
 
@@ -783,31 +615,24 @@ int main(int argc, char **argv) {
     trackers_[serial].bTh[4] = aa.angle() * aa.axis()[1];
     trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];
     trackers_[serial].ready = false;
+    // Publish sensor location and body trajectory 
+    pub_sensors_[serial] = nh.advertise<visualization_msgs::MarkerArray>(
+      "/sensors/" + *jt, 10, true);
+    pub_path_[serial] = nh.advertise<nav_msgs::Path>(
+      "/path/" + *jt, 10, true);
   }
 
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
-  if (ReadConfig(calfile_, lighthouses_, trackers_)) {
+  if (ReadConfig(calfile_, frame_world_, frame_vive_, frame_body_,
+    registration_, lighthouses_, trackers_)) {
     ROS_INFO("Read transforms from calibration");
   } else {
     ROS_INFO("Could not read calibration file");
   }
-  SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
-
-  // Assume body and truth are identity so we get nice visuals
-  geometry_msgs::TransformStamped tfs;
-  tfs.header.stamp = ros::Time::now();
-  tfs.header.frame_id = frame_estimate_;
-  tfs.child_frame_id = frame_child_;
-  tfs.transform.translation.x = 0.0;
-  tfs.transform.translation.y = 0.0;
-  tfs.transform.translation.z = 0.0;
-  tfs.transform.rotation.x = 0.0;
-  tfs.transform.rotation.y = 0.0;
-  tfs.transform.rotation.z = 0.0;
-  tfs.transform.rotation.w = 1.0;
-  SendStaticTransform(tfs);
+  SendTransforms(frame_world_, frame_vive_, frame_body_,
+    registration_, lighthouses_, trackers_);
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  = 
@@ -820,18 +645,8 @@ int main(int argc, char **argv) {
         NewLighthouseCallback));
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
-  ros::Subscriber sub_corrections =
-    nh.subscribe("/tf", 1000, CorrectionCallback);
   ros::ServiceServer service =
     nh.advertiseService("/trigger", TriggerCallback);
-
-  // Publish sensor location and body trajectory 
-  pub_sensors_ =
-    nh.advertise<visualization_msgs::MarkerArray>("/sensors", 10, true);
-  pub_path_ =
-    nh.advertise<nav_msgs::Path>("/path", 10, true);
-  pub_corr_ =
-    nh.advertise<nav_msgs::Path>("/corr", 10, true);
 
   // Setup a timer to automatically trigger solution on end of experiment
   timer_ = nh.createTimer(ros::Duration(1.0), TimerCallback, true, false);

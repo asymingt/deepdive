@@ -47,7 +47,7 @@ enum Motors {
 
 // Lighthouse data structure
 struct Lighthouse {
-  double wTl[6];
+  double vTl[6];
   double params[NUM_MOTORS][NUM_PARAMS];
   bool ready;
 };
@@ -61,6 +61,7 @@ struct Tracker {
   double sensors[NUM_SENSORS*6];
   double errors[NUM_ERRORS][3];
   bool ready;
+  std::map<ros::Time, double[6]> vTt;   // Calibration only
 };
 typedef std::map<std::string, Tracker> TrackerMap;
 
@@ -81,19 +82,30 @@ void SendStaticTransform(geometry_msgs::TransformStamped const& tfs);
 void SendDynamicTransform(geometry_msgs::TransformStamped const& tfs);
 
 void SendTransforms(
-  std::string const& frame_parent, std::string const& frame_child,
+  std::string const& frame_world,   // World name
+  std::string const& frame_vive,    // Vive frame name
+  std::string const& frame_body,    // Body frame name
+  double registration[6],
   LighthouseMap const& lighthouses, TrackerMap const& trackers);
+
 
 // CONFIG MANAGEMENT
 
 // Parse a human-readable configuration
-bool ReadConfig(std::string const& calfile,
-  LighthouseMap & lighthouses, TrackerMap & trackers);
+bool ReadConfig(std::string const& calfile,   // Calibration file
+  std::string const& frame_world,             // World name
+  std::string const& frame_vive,              // Vive frame name
+  std::string const& frame_body,              // Body frame name
+  double registration[6],
+  LighthouseMap lighthouses, TrackerMap trackers);
 
 // Write a human-readable configuration
-bool WriteConfig(std::string const& calfile,
-  std::string const& parent_frame, std::string const& child_frame,
-    LighthouseMap const& lighthouses, TrackerMap const& trackers);
+bool WriteConfig(std::string const& calfile,    // Calibration file
+  std::string const& frame_world,               // World name
+  std::string const& frame_vive,                // Vive frame name
+  std::string const& frame_body,                // Body frame name
+  double registration[6],
+  LighthouseMap const& lighthouses, TrackerMap const& trackers);
 
 // REUSABLE CALLS
 

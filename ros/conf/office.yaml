@@ -20,8 +20,9 @@
 # Parent frame is the "world" frame, and child frame is typically "truth",
 # and estimate is usally "body"
 frames:
-  parent:           "world"
-  child:            "truth"
+  world:            "world"
+  vive:             "vive"
+  body:             "truth"
   estimate:         "body"
 
 # Thresholds used to reject measurements
@@ -57,22 +58,8 @@ tracker_test:
 
 # CALIBRATION OPTIONS
 
-# Maximum resolution (time difference) between poses in the graph
-resolution:         0.001
-
-# Lock the Z coordinate of the body-frame (force solution on Z plane)
-force2d:            false
-
-# The sensor was static at the time the data was recorded
-static:             false
-
-# Initial pose of the robot (will be used when no corrections exist)
-pose:               [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
-
-# What else to refine, besides the lighthouse ans sensor positions
+# What else to refine, besides the lighthouse / sensor positions
 refine:
-  lighthouses:      true       # Refine lighthouse positions
-  trajectory:       true       # If false we will use the corrections
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
@@ -81,7 +68,6 @@ refine:
 # Relative weighting of measurements (light/correction only used for)
 weight:
   light:            1.0
-  correction:       1.0
   motion:           10.0
 
 # These are the parameters used by the non-linear least squares optimizer

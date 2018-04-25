@@ -23,12 +23,14 @@ void SendDynamicTransform(geometry_msgs::TransformStamped const& tfs) {
 }
 
 void SendTransforms(
-  std::string const& frame_parent, std::string const& frame_child,
+  std::string const& frame_world,   // World name
+  std::string const& frame_vive,    // Vive frame name
+  std::string const& frame_body,    // Body frame name
+  double registration[6],
   LighthouseMap const& lighthouses, TrackerMap const& trackers) {
-  // Publish lighthouse positions
-  LighthouseMap::const_iterator it;
-  for (it = lighthouses.begin(); it != lighthouses.end(); it++)  {
-    Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
+  // Publish world -> vive transform
+  {
+    Eigen::Vector3d v(registration[3], registration[4], registration[5]);
     Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
     if (v.norm() > 0) {
       aa.angle() = v.norm();
@@ -37,11 +39,34 @@ void SendTransforms(
     Eigen::Quaterniond q(aa);
     geometry_msgs::TransformStamped tfs;
     tfs.header.stamp = ros::Time::now();
-    tfs.header.frame_id = frame_parent;
+    tfs.header.frame_id = frame_world;
+    tfs.child_frame_id = frame_vive;
+    tfs.transform.translation.x = registration[0];
+    tfs.transform.translation.y = registration[1];
+    tfs.transform.translation.z = registration[2];
+    tfs.transform.rotation.x = q.x();
+    tfs.transform.rotation.y = q.y();
+    tfs.transform.rotation.z = q.z();
+    tfs.transform.rotation.w = q.w();
+    SendStaticTransform(tfs);
+  }
+  // Publish lighthouse positions
+  LighthouseMap::const_iterator it;
+  for (it = lighthouses.begin(); it != lighthouses.end(); it++)  {
+    Eigen::Vector3d v(it->second.vTl[3], it->second.vTl[4], it->second.vTl[5]);
+    Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
+    if (v.norm() > 0) {
+      aa.angle() = v.norm();
+      aa.axis() = v.normalized();
+    }
+    Eigen::Quaterniond q(aa);
+    geometry_msgs::TransformStamped tfs;
+    tfs.header.stamp = ros::Time::now();
+    tfs.header.frame_id = frame_vive;
     tfs.child_frame_id = it->first;
-    tfs.transform.translation.x = it->second.wTl[0];
-    tfs.transform.translation.y = it->second.wTl[1];
-    tfs.transform.translation.z = it->second.wTl[2];
+    tfs.transform.translation.x = it->second.vTl[0];
+    tfs.transform.translation.y = it->second.vTl[1];
+    tfs.transform.translation.z = it->second.vTl[2];
     tfs.transform.rotation.x = q.x();
     tfs.transform.rotation.y = q.y();
     tfs.transform.rotation.z = q.z();
@@ -60,7 +85,7 @@ void SendTransforms(
     Eigen::Quaterniond q(aa);
     geometry_msgs::TransformStamped tfs;
     tfs.header.stamp = ros::Time::now();
-    tfs.header.frame_id = frame_child;
+    tfs.header.frame_id = frame_body;
     tfs.child_frame_id = jt->first;
     tfs.transform.translation.x = jt->second.bTh[0];
     tfs.transform.translation.y = jt->second.bTh[1];
@@ -76,8 +101,12 @@ void SendTransforms(
 // CONFIG MANAGEMENT
 
 // Parse a human-readable configuration
-bool ReadConfig(std::string const& calfile,
-  LighthouseMap & lighthouses, TrackerMap & trackers) {
+bool ReadConfig(std::string const& calfile,   // Calibration file
+  std::string const& frame_world,             // World name
+  std::string const& frame_vive,              // Vive frame name
+  std::string const& frame_body,              // Body frame name
+  double registration[6],
+  LighthouseMap lighthouses, TrackerMap trackers) {
   // Entries take the form x y z qx qy qz qw parent child
   std::ifstream infile(calfile);
   if (!infile.is_open()) {
@@ -95,17 +124,27 @@ bool ReadConfig(std::string const& calfile,
       return false;
     }
     Eigen::AngleAxisd aa(Eigen::Quaterniond(qw, qx, qy, qz));
-    if (lighthouses.find(c) != lighthouses.end()) {
-      lighthouses[c].wTl[0] = x;
-      lighthouses[c].wTl[1] = y;
-      lighthouses[c].wTl[2] = z;
-      lighthouses[c].wTl[3] = aa.angle() * aa.axis()[0];
-      lighthouses[c].wTl[4] = aa.angle() * aa.axis()[1];
-      lighthouses[c].wTl[5] = aa.angle() * aa.axis()[2];
+    if (p == frame_world && c == frame_vive) {
+      registration[0] = x;
+      registration[1] = y;
+      registration[2] = z;
+      registration[3] = aa.angle() * aa.axis()[0];
+      registration[4] = aa.angle() * aa.axis()[1];
+      registration[5] = aa.angle() * aa.axis()[2];
       count++;
       continue;
     }
-    if (trackers.find(c) != trackers.end()) {
+    if (p == frame_vive && lighthouses.find(c) != lighthouses.end()) {
+      lighthouses[c].vTl[0] = x;
+      lighthouses[c].vTl[1] = y;
+      lighthouses[c].vTl[2] = z;
+      lighthouses[c].vTl[3] = aa.angle() * aa.axis()[0];
+      lighthouses[c].vTl[4] = aa.angle() * aa.axis()[1];
+      lighthouses[c].vTl[5] = aa.angle() * aa.axis()[2];
+      count++;
+      continue;
+    }
+    if (p == frame_body && trackers.find(c) != trackers.end()) {
       trackers[c].bTh[0] = x;
       trackers[c].bTh[1] = y;
       trackers[c].bTh[2] = z;
@@ -117,35 +156,57 @@ bool ReadConfig(std::string const& calfile,
     }
     ROS_WARN_STREAM("Transform " << p << " -> " << c << " invalid");
   }
-  return (count == lighthouses.size() + trackers.size());
+  return (count == 1 + lighthouses.size() + trackers.size());
 }
 
 // Write a human-readable configuration
-bool WriteConfig(std::string const& calfile,
-  std::string const& parent_frame, std::string const& child_frame,
-    LighthouseMap const& lighthouses, TrackerMap const& trackers) {
+bool WriteConfig(std::string const& calfile,    // Calibration file
+  std::string const& frame_world,               // World name
+  std::string const& frame_vive,                // Vive frame name
+  std::string const& frame_body,                // Body frame name
+  double registration[6],
+  LighthouseMap const& lighthouses, TrackerMap const& trackers) {
   std::ofstream outfile(calfile);
   if (!outfile.is_open()) {
     ROS_WARN("Could not open config file for writing");
     return false;
   }
+  // World registration
+  {
+    Eigen::Vector3d v(registration[3], registration[4], registration[5]);
+    Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
+    if (v.norm() > 0) {
+      aa.angle() = v.norm();
+      aa.axis() = v.normalized();
+    }
+    Eigen::Quaterniond q(aa);
+    outfile << registration[0] << " "
+            << registration[1] << " "
+            << registration[2] << " "
+            << q.x() << " "
+            << q.y() << " "
+            << q.z() << " "
+            << q.w() << " "
+            << frame_world << " " << frame_vive
+            << std::endl;
+  }
   LighthouseMap::const_iterator it;
   for (it = lighthouses.begin(); it != lighthouses.end(); it++)  {
-    Eigen::Vector3d v(it->second.wTl[3], it->second.wTl[4], it->second.wTl[5]);
+    Eigen::Vector3d v(it->second.vTl[3], it->second.vTl[4], it->second.vTl[5]);
     Eigen::AngleAxisd aa;
     if (v.norm() > 0) {
       aa.angle() = v.norm();
       aa.axis() = v.normalized();
     }
     Eigen::Quaterniond q(aa);
-    outfile << it->second.wTl[0] << " "
-            << it->second.wTl[1] << " "
-            << it->second.wTl[2] << " "
+    outfile << it->second.vTl[0] << " "
+            << it->second.vTl[1] << " "
+            << it->second.vTl[2] << " "
             << q.x() << " "
             << q.y() << " "
             << q.z() << " "
             << q.w() << " "
-            << parent_frame << " " << it->first
+            << frame_vive << " " << it->first
             << std::endl;
   }
   TrackerMap::const_iterator jt;
@@ -164,7 +225,7 @@ bool WriteConfig(std::string const& calfile,
             << q.y() << " "
             << q.z() << " "
             << q.w() << " "
-            << child_frame << " " << jt->first
+            << frame_body << " " << jt->first
             << std::endl;
   }
   return true;
