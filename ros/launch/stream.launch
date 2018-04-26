@@ -1,0 +1,18 @@
+<launch>
+  <!-- Arguments -->
+  <arg name="profile" default="granite" />
+  <arg name="output" default="screen" />
+  <arg name="rviz" default="true" />
+  <!-- Derived -->
+  <arg name="f_rviz" default="$(find deepdive_ros)/rviz/$(arg profile).rviz"/>
+  <!-- Bridge -->
+  <node pkg="deepdive_ros" type="deepdive_bridge"
+        name="$(arg profile)_bridge" output="$(arg output)"/>
+  <!-- Visualization -->
+  <group if="$(arg rviz)">
+    <node pkg="tf2_ros" type="static_transform_publisher" name="rviz_bc"
+      args="0 0 0 1 0 0 0 world rviz" />
+    <node pkg="rviz" type="rviz"
+          name="deepdive_rviz" args="-d $(arg f_rviz)"/>
+  </group>
+</launch>

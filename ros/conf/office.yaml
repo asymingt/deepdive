@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -59,17 +59,6 @@ tracker_test:
 
 # Calibration resolution
 resolution:         0.1
-
-# What else to refine, besides the lighthouse / sensor positions
-refine:
-  extrinsics:       false      # If false tracker frame is the body frame
-  sensors:          false      # Refine sensor positions
-  params:           false      # Refine lighthouse parameters
-
-# Relative weighting of measurements
-weight:
-  light:            1.0        # 1mm over 10m
-  motion:           1.0        # 1m/s velocity uncertainty
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:

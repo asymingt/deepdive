@@ -111,11 +111,26 @@ void LightCallback(struct Tracker * tracker,
   struct Lighthouse * lighthouse, uint8_t axis, uint32_t synctime,
   uint16_t num_sensors, uint16_t *sensors, uint32_t *sweeptimes,
   uint32_t *angles, uint16_t *lengths) {
-  static deepdive_ros::Light msg;
+  deepdive_ros::Light msg;
   msg.header.frame_id = tracker->serial;
   msg.header.stamp = ros::Time::now();
   msg.lighthouse = lighthouse->serial;
-  msg.axis = axis;
+  // Make sure we convert to RHS
+  double scale = 1.0;
+  switch (axis) {
+  case MOTOR_CW_ABOUT_LH_X:
+    msg.axis = deepdive_ros::Motor::AXIS_CCW_ABOUT_LH_X;
+    scale = -1.0;
+    break;
+  case MOTOR_CCW_ABOUT_LH_Y:
+    msg.axis = deepdive_ros::Motor::AXIS_CCW_ABOUT_LH_Y;
+    scale = 1.0;
+    break;
+  default:
+    ROS_WARN("Received light with invalid axis");
+    return;
+  }
+  // Add the pulses
   msg.pulses.resize(num_sensors);
   for (uint16_t i = 0; i < num_sensors; i++) {
     msg.pulses[i].sensor = sensors[i];
@@ -132,7 +147,7 @@ void LightCallback(struct Tracker * tracker,
 void ImuCallback(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]) {
   // Package up the IMU data
-  static sensor_msgs::Imu msg;
+  sensor_msgs::Imu msg;
   msg.header.frame_id = tracker->serial;
   msg.header.stamp = ros::Time::now();
   msg.linear_acceleration.x =
@@ -155,7 +170,7 @@ void ImuCallback(struct Tracker * tracker, uint32_t timecode,
 void ButtonCallback(struct Tracker * tracker,
   uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical) {
   // Package up the button data
-  static deepdive_ros::Button msg;
+  deepdive_ros::Button msg;
   msg.tracker = tracker->serial;
   msg.mask = mask;
   msg.trigger_val = trigger;

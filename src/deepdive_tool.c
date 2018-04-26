@@ -35,17 +35,26 @@
 
 #include <deepdive.h>
 
+// Enable X and Y axis
+int enx_ = 0;
+int eny_ = 0;
+
 // Callback to display light info
 void my_light_process(struct Tracker * tracker, struct Lighthouse * lighthouse,
   uint8_t axis, uint32_t synctime, uint16_t num_sensors, uint16_t *sensors,
     uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths) {
   static float angcnv, lencnv;
+  // Enable X and Y
+  if (axis == 0 && eny_ == 0) return;
+  if (axis == 1 && enx_ == 0) return;
   // Print header info
-  printf("[%u] # %s LH %s AXIS %c\n", synctime, tracker->serial,
-    lighthouse->serial, (axis ? 'Y' : 'X'));
+  printf("[%u] # %s LH %s %s\n", synctime, tracker->serial, lighthouse->serial,
+    (axis == MOTOR_CCW_ABOUT_LH_Y ? "CCW ABOUT LH Y" : "CCW ABOUT LH X"));
   // Print sensor info
   for (uint16_t i = 0; i < num_sensors; i++) {
     angcnv = (180.0 / 400000.0) * ((float)(angles[i]) - 200000.0);
+    if (axis == MOTOR_CW_ABOUT_LH_X)
+      angcnv = -angcnv;
     lencnv = ((float)lengths[i]) / 48000000.0 * 1000000.0;
     printf(" ->  SEN (%2u) ANG (%f deg) LEN (%f us)\n",
       sensors[i], angcnv, lencnv);
@@ -158,13 +167,14 @@ void my_lighthouse_process(struct Lighthouse *l) {
 int main(int argc, char **argv) {
   // Get commandline arguments
   struct arg_lit  *imu     = arg_lit0("i", "imu", "print imu");
-  struct arg_lit  *light   = arg_lit0("l", "light", "print light");
+  struct arg_lit  *lx      = arg_lit0("x", "lightx", "print rotation about LH X");
+  struct arg_lit  *ly      = arg_lit0("y", "lighty", "print rotation about LH Y");
   struct arg_lit  *button  = arg_lit0("b", "button", "print buttons");
   struct arg_lit  *lh      = arg_lit0("h", "lh", "print lighthouse info");
   struct arg_lit  *tracker = arg_lit0("t", "tracker", "print tracker info");
   struct arg_lit  *help    = arg_lit0(NULL, "help", "print this help and exit");
   struct arg_end  *end     = arg_end(20);
-  void* argtable[] = {imu, light, button, tracker, lh, help, end};
+  void* argtable[] = {imu, lx, ly, button, tracker, lh, help, end};
   // Verify we allocated correcty
   const char* progname = "deepdive_tool";
   int nerrors, exitcode = 0;
@@ -199,10 +209,13 @@ int main(int argc, char **argv) {
     exitcode = 3;
     goto exit;
   }
+  // Limit to X or Y
+  enx_ = lx->count;
+  eny_ = ly->count;
   // Install callbacks
   if (imu->count > 0)
     deepdive_install_imu_fn(drv, my_imu_process);
-  if (light->count > 0)
+  if (lx->count + ly->count > 0)
     deepdive_install_light_fn(drv, my_light_process);
   if (button->count > 0)
     deepdive_install_button_fn(drv, my_button_process);

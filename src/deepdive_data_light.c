@@ -294,6 +294,9 @@ void handle_measurements(struct Tracker * tracker) {
   lh = lcd->per_sweep.activeLighthouse;
   ax = lcd->per_sweep.activeAcode & 1;
 
+  // Get the rotation based on the axis and negate Y to 
+  uint8_t motor = (ax == 0 ? MOTOR_CCW_ABOUT_LH_Y : MOTOR_CW_ABOUT_LH_X);
+
   // Copy over the final data
   num_sensors = 0;
   for (int i = 0; i < MAX_NUM_SENSORS; i++) {
@@ -316,7 +319,7 @@ void handle_measurements(struct Tracker * tracker) {
   if (num_sensors > 0 && tracker->ootx[lh].lighthouse) {
     if (tracker->driver->lig_fn)
       tracker->driver->lig_fn(tracker, tracker->ootx[lh].lighthouse,
-        ax, st, num_sensors, sensors, sweeptimes, angles, lengths);
+        motor, st, num_sensors, sensors, sweeptimes, angles, lengths);
   }
 
   // Clear memory

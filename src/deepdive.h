@@ -171,9 +171,9 @@ struct Tracker {
 
 // Motor information
 typedef enum {
-  MOTOR_HORIZONTAL = 0,
-  MOTOR_VERTICAL   = 1,
-  MAX_NUM_MOTORS   = 2
+  MOTOR_CCW_ABOUT_LH_Y = 0,   // Rotation counter-clockwise about LH frame Y
+  MOTOR_CW_ABOUT_LH_X = 1,    // Rotation clockwise about LH frame X
+  MAX_NUM_MOTORS = 2
 } MotorType;
 
 /* Phase is indeed an offset correction to bearing angles from

@@ -57,21 +57,10 @@ std::string frame_body_ = "truth";
 // Whether to apply corrections
 bool correct_ = false;
 
-// What to solve for
-bool refine_sensors_ = false;
-bool refine_params_ = false;
-
 // Rejection thresholds
 int thresh_count_ = 4;
 double thresh_angle_ = 60.0;
 double thresh_duration_ = 1.0;
-
-// Graph resolution
-double res_;
-
-// What to weight motion cost relative to the other errors
-double weight_light_ = 1e-6;
-double weight_motion_ = 1.0;
 
 // Solver parameters
 ceres::Solver::Options options_;
@@ -84,6 +73,9 @@ bool visualize_ = true;
 
 // Are we recording right now?
 bool recording_ = false;
+
+// Graph resolution
+double res_;
 
 // World -> vive registatration
 double registration_[6];
@@ -102,21 +94,25 @@ struct TransformCost {
                   const T* const mTt,         // Tracker -> master transform
                   const T* const sTt,         // Tracker -> slave transform
                   T* residual) const {
-    // Rotational component
-    //  err = mRt * (mRs * sRt)^-1
-    T q[4], mRs[4], sRt[4], mRt[4], mRt_inv[4];
-    ceres::AngleAxisToQuaternion(&mTt[3], mRt);
-    ceres::AngleAxisToQuaternion(&mTs[3], mRs);
-    ceres::AngleAxisToQuaternion(&sTt[3], sRt);
-    ceres::QuaternionProduct(mRs, sRt, mRt_inv);
-    mRt_inv[1] = -mRt_inv[1];
-    mRt_inv[2] = -mRt_inv[2];
-    mRt_inv[3] = -mRt_inv[3];
-    ceres::QuaternionProduct(mRt, mRt_inv, q);
-    ceres::QuaternionToAngleAxis(q, &residual[3]);
-    // Translational component
-    for (size_t i = 0; i < 3; i++)
-      residual[i] = mTt[i] - (mTs[i] + sTt[i]);
+    // Extract rotations
+    Eigen::Transform<T, 3, Eigen::Affine> mEs, mEt, sEt;
+    ceres::AngleAxisToRotationMatrix(&mTs[3], ceres::ColumnMajorAdapter3x3(mEs.linear().data()));
+    ceres::AngleAxisToRotationMatrix(&mTt[3], ceres::ColumnMajorAdapter3x3(mEt.linear().data()));
+    ceres::AngleAxisToRotationMatrix(&sTt[3], ceres::ColumnMajorAdapter3x3(sEt.linear().data()));
+    for (size_t i = 0; i < 3; i++) {
+      mEs.translation()[i] = mTs[i];
+      mEt.translation()[i] = mTt[i];
+      sEt.translation()[i] = sTt[i];
+    }
+    const Eigen::Transform<T, 3, Eigen::Affine> e = (mEs * sEt) * mEt.transpose();
+    Eigen::Matrix<T, 3, 1> aa;
+    ceres::RotationMatrixToAngleAxis(ceres::ColumnMajorAdapter3x3(e.data()), aa.data());
+    residual[0] = e.translation()[0];
+    residual[1] = e.translation()[1];
+    residual[2] = e.translation()[2];
+    residual[3] = aa[0];
+    residual[4] = aa[1];
+    residual[5] = aa[2];
     return true;
   }
 };
@@ -291,31 +287,30 @@ bool Solve() {
     LighthouseMap::iterator lm = lighthouses_.begin();  // First is master
     LighthouseMap::iterator lt;                         //
     for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
-      // Special case for master lighthouse
-      if (lt == lighthouses_.begin()) {
-        for (size_t i = 0; i < 6; i++)
-          lt->second.vTl[0] = 0;
-        continue;
-      }
-      // Only get here for slave lighthouses
-      TrackerMap::iterator tt;
-      for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
-        std::map<ros::Time, std::map<std::string, double[6]>>::iterator pt;
-        for (pt = poses[tt->first].begin(); pt != poses[tt->first].end(); pt++) {
-          // We must have a pose for both the master AND the slave
-          if (pt->second.find(lt->first) == pt->second.end() ||
-              pt->second.find(lm->first) == pt->second.end()) continue;
-          // If we get here, then we have a correspondence
-          ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
-            TransformCost, 6, 6, 6, 6>(new TransformCost());
-          // Add a residual block to represent this measurement
-          problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-            reinterpret_cast<double*>(lt->second.vTl),
-            reinterpret_cast<double*>(pt->second[lm->first]),
-            reinterpret_cast<double*>(pt->second[lt->first]));
-          // Make sure we mark the poses as constant
-          problem.SetParameterBlockConstant(pt->second[lm->first]);
-          problem.SetParameterBlockConstant(pt->second[lt->first]);
+      // Master lighthouse
+      for (size_t i = 0; i < 6; i++)
+        lt->second.vTl[0] = 0;
+      // Slave lighthouse
+      if (lt != lighthouses_.begin()) {
+        TrackerMap::iterator tt;
+        for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+          std::map<ros::Time, std::map<std::string, double[6]>>::iterator pt;
+          for (pt = poses[tt->first].begin(); pt != poses[tt->first].end(); pt++) {
+            // We must have a pose for both the master AND the slave
+            if (pt->second.find(lt->first) == pt->second.end() ||
+                pt->second.find(lm->first) == pt->second.end()) continue;
+            // If we get here, then we have a correspondence
+            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
+              TransformCost, 6, 6, 6, 6>(new TransformCost());
+            // Add a residual block to represent this measurement
+            problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
+              reinterpret_cast<double*>(lt->second.vTl),          // mTs
+              reinterpret_cast<double*>(pt->second[lm->first]),   // mTt
+              reinterpret_cast<double*>(pt->second[lt->first]));  // sTt
+            // Make sure we mark the poses as constant
+            problem.SetParameterBlockConstant(pt->second[lm->first]);
+            problem.SetParameterBlockConstant(pt->second[lt->first]);
+          }
         }
       }
     }
@@ -351,7 +346,7 @@ bool Solve() {
     if (visualize_) {
       LighthouseMap::iterator lt;
       for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
-        // Get the lighthouse -> world transform
+        // Get the lighthouse -> vive transform
         Eigen::Vector3d v(
           lt->second.vTl[3], lt->second.vTl[4], lt->second.vTl[5]);
         Eigen::AngleAxisd aa;
@@ -365,19 +360,26 @@ bool Solve() {
         vTl.translation()[2] = lt->second.vTl[2];
         vTl.linear() = aa.toRotationMatrix();
         // Now project the trajectory
-        TrackerMap::iterator jt;
-        for (jt = trackers_.begin(); jt != trackers_.end(); jt++) {
+        TrackerMap::iterator tt;
+        for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+          // Path
+          nav_msgs::Path msg;
+          msg.header.stamp = ros::Time::now();
+          msg.header.frame_id = "world";
           // Iterate over timestamp
           std::map<ros::Time, std::map<std::string, double[6]>>::iterator pt;
           for (pt = poses[tt->first].begin(); pt != poses[tt->first].end(); pt++) {
             // We must have a pose for both the master AND the slave
             if (pt->second.find(lt->first) == pt->second.end())
               continue;
-            Eigen::Vector3d v(it->second[0], it->second[1], it->second[2]);
+            Eigen::Vector3d v(
+              pt->second[lt->first][0],
+              pt->second[lt->first][1],
+              pt->second[lt->first][2]);
             v = vTl * v;
             // PUblish pose
             geometry_msgs::PoseStamped ps;
-            ps.header.stamp = it->first;
+            ps.header.stamp = pt->first;
             ps.header.frame_id = frame_vive_;
             ps.pose.position.x = v[0];
             ps.pose.position.y = v[1];
@@ -388,7 +390,7 @@ bool Solve() {
             ps.pose.orientation.z = 0.0;
             msg.poses.push_back(ps);
           }
-          pub_path_[lt->first][jt->first].publish(msg);
+          pub_path_[lt->first][tt->first].publish(msg);
         }
       }
     }
@@ -554,27 +556,13 @@ int main(int argc, char **argv) {
   if (!nh.getParam("thresholds/duration", thresh_duration_))
     ROS_FATAL("Failed to get thresholds/duration parameter.");
 
-  // What to refine
-  if (!nh.getParam("refine/sensors", refine_sensors_))
-    ROS_FATAL("Failed to get refine/sensors parameter.");
-  if (!nh.getParam("refine/params", refine_params_))
-    ROS_FATAL("Failed to get refine/params parameter.");
-
   // Tracking resolution
   if (!nh.getParam("resolution", res_))
     ROS_FATAL("Failed to get resolution parameter.");
 
-  // What weights to use
-  if (!nh.getParam("weight/light", weight_light_))
-    ROS_FATAL("Failed to get weight/light parameter.");
-  if (!nh.getParam("weight/motion", weight_motion_))
-    ROS_FATAL("Failed to get weight/motion parameter.");
-
   // Whether to apply light corrections
   if (!nh.getParam("correct", correct_))
     ROS_FATAL("Failed to get correct parameter.");
-  if (!correct_)
-    refine_params_ = false;
 
   // Define the ceres problem
   options_.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
@@ -609,12 +597,12 @@ int main(int argc, char **argv) {
     }
     Eigen::Quaterniond q(transform[6], transform[3], transform[4], transform[5]);
     Eigen::AngleAxisd aa(q);
-    lighthouses_[serial].vTl[0] = transform[0];
-    lighthouses_[serial].vTl[1] = transform[1];
-    lighthouses_[serial].vTl[2] = transform[2];
-    lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
-    lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
-    lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
+    // lighthouses_[serial].vTl[0] = transform[0];
+    // lighthouses_[serial].vTl[1] = transform[1];
+    // lighthouses_[serial].vTl[2] = transform[2];
+    // lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
+    // lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
+    // lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
     lighthouses_[serial].ready = false;
   }
 
