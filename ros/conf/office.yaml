@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            true
+correct:            false
 
 # List of lighthouses to be included in tracking
 lighthouses:
