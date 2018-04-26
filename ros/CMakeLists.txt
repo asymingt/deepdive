@@ -26,6 +26,9 @@ set(UKF_INCLUDE_DIRS ${source_dir}/include)
 # Find Eigen
 find_package(Eigen3 REQUIRED)
 
+# Find Eigen
+find_package(OpenCV 3 REQUIRED)
+
 # Non-linear least squares optimization (apt install libceres-dev)
 find_package(Ceres REQUIRED)
 
@@ -40,6 +43,7 @@ include_directories(src
   ${DEEPDIVE_INCLUDE_DIRS}
   ${UKF_INCLUDE_DIRS}
   ${CERES_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS})
 
 # Bootstrap catkin_simple
@@ -60,7 +64,7 @@ cs_add_library(deepdive_core src/deepdive.cc)
 
 # Solver finds the world pose of every lighthouse
 cs_add_executable(deepdive_calibration src/deepdive_calibration.cc)
-target_link_libraries(deepdive_calibration deepdive_core ${CERES_LIBRARIES})
+target_link_libraries(deepdive_calibration deepdive_core ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 # Install products
 cs_install()

@@ -29,14 +29,13 @@ frames:
 thresholds:
   count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         1.00       # Threshod on duration (in microsecs)
-  correction:       0.01       # 10ms threshold on mapped time
+  duration:         1.00       # Threshold on duration (in microsecs)
 
 # Publish rviz markers for the sensors
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            true
+correct:            false
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -58,17 +57,19 @@ tracker_test:
 
 # CALIBRATION OPTIONS
 
+# Calibration resolution
+resolution:         0.1
+
 # What else to refine, besides the lighthouse / sensor positions
 refine:
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
-  head:             false      # Refine head transform
 
-# Relative weighting of measurements (light/correction only used for)
+# Relative weighting of measurements
 weight:
-  light:            1.0
-  motion:           10.0
+  light:            1.0        # 1mm over 10m
+  motion:           1.0        # 1m/s velocity uncertainty
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
