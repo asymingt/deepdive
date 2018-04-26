@@ -24,10 +24,6 @@
 #include <deepdive_ros/Trackers.h>
 
 // Ceres and logging
-#include <ceres/ceres.h>
-#include <ceres/rotation.h>
-
-// Ceres and logging
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
@@ -62,9 +58,6 @@ int thresh_count_ = 4;
 double thresh_angle_ = 60.0;
 double thresh_duration_ = 1.0;
 
-// Solver parameters
-ceres::Solver::Options options_;
-
 // Are we running in "offline" mode
 bool offline_ = false;
 
@@ -87,35 +80,74 @@ std::map<std::string, std::map<std::string, ros::Publisher>> pub_path_;
 // Timer for managing offline
 ros::Timer timer_;
 
-struct TransformCost {
-  explicit TransformCost() {}
-  template <typename T>
-  bool operator()(const T* const mTs,         // Slave -> master transform
-                  const T* const mTt,         // Tracker -> master transform
-                  const T* const sTt,         // Tracker -> slave transform
-                  T* residual) const {
-    // Extract rotations
-    Eigen::Transform<T, 3, Eigen::Affine> mEs, mEt, sEt;
-    ceres::AngleAxisToRotationMatrix(&mTs[3], ceres::ColumnMajorAdapter3x3(mEs.linear().data()));
-    ceres::AngleAxisToRotationMatrix(&mTt[3], ceres::ColumnMajorAdapter3x3(mEt.linear().data()));
-    ceres::AngleAxisToRotationMatrix(&sTt[3], ceres::ColumnMajorAdapter3x3(sEt.linear().data()));
-    for (size_t i = 0; i < 3; i++) {
-      mEs.translation()[i] = mTs[i];
-      mEt.translation()[i] = mTt[i];
-      sEt.translation()[i] = sTt[i];
-    }
-    const Eigen::Transform<T, 3, Eigen::Affine> e = (mEs * sEt) * mEt.transpose();
-    Eigen::Matrix<T, 3, 1> aa;
-    ceres::RotationMatrixToAngleAxis(ceres::ColumnMajorAdapter3x3(e.data()), aa.data());
-    residual[0] = e.translation()[0];
-    residual[1] = e.translation()[1];
-    residual[2] = e.translation()[2];
-    residual[3] = aa[0];
-    residual[4] = aa[1];
-    residual[5] = aa[2];
-    return true;
+// This algorithm solves the Procrustes problem in that it finds an affine transform
+// (rotation, translation, scale) that maps the "in" matrix to the "out" matrix
+// Code from: https://github.com/oleg-alexandrov/projects/blob/master/eigen/Kabsch.cpp
+// License is that this code is release in the public domain... Thanks, Oleg :)
+template <typename T>
+static bool Kabsch(
+  Eigen::Matrix<T, 3, Eigen::Dynamic> in,
+  Eigen::Matrix<T, 3, Eigen::Dynamic> out,
+  Eigen::Transform<T, 3, Eigen::Affine> &A, bool allowScale) {
+  // Default output
+  A.linear() = Eigen::Matrix<T, 3, 3>::Identity(3, 3);
+  A.translation() = Eigen::Matrix<T, 3, 1>::Zero();
+  // A simple check to see that we have a sufficient number of correspondences
+  if (in.cols() < 4) {
+    // ROS_WARN("Visualeyez needs to see at least four LEDs to track");
+    return false;
   }
-};
+  // A simple check to see that we have a sufficient number of correspondences
+  if (in.cols() != out.cols()) {
+    // ROS_ERROR("Same number of points required in input matrices");
+    return false;
+  }
+  // First find the scale, by finding the ratio of sums of some distances,
+  // then bring the datasets to the same scale.
+  T dist_in = T(0.0), dist_out = T(0.0);
+  for (int col = 0; col < in.cols()-1; col++) {
+    dist_in  += (in.col(col+1) - in.col(col)).norm();
+    dist_out += (out.col(col+1) - out.col(col)).norm();
+  }
+  if (dist_in <= T(0.0) || dist_out <= T(0.0))
+    return true;
+  T scale = T(1.0);
+  if (allowScale) {
+    scale = dist_out/dist_in;
+    out /= scale;
+  }
+  // Find the centroids then shift to the origin
+  Eigen::Matrix<T, 3, 1> in_ctr = Eigen::Matrix<T, 3, 1>::Zero();
+  Eigen::Matrix<T, 3, 1> out_ctr = Eigen::Matrix<T, 3, 1>::Zero();
+  for (int col = 0; col < in.cols(); col++) {
+    in_ctr  += in.col(col);
+    out_ctr += out.col(col);
+  }
+  in_ctr /= T(in.cols());
+  out_ctr /= T(out.cols());
+  for (int col = 0; col < in.cols(); col++) {
+    in.col(col)  -= in_ctr;
+    out.col(col) -= out_ctr;
+  }
+  // SVD
+  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> Cov = in * out.transpose();
+  Eigen::JacobiSVD < Eigen::Matrix < T, Eigen::Dynamic, Eigen::Dynamic > > svd(Cov,
+    Eigen::ComputeThinU | Eigen::ComputeThinV);
+  // Find the rotation
+  T d = (svd.matrixV() * svd.matrixU().transpose()).determinant();
+  if (d > T(0.0))
+    d = T(1.0);
+  else
+    d = T(-1.0);
+  Eigen::Matrix<T, 3, 3> I = Eigen::Matrix<T, 3, 3>::Identity(3, 3);
+  I(2, 2) = d;
+  Eigen::Matrix<T, 3, 3> R = svd.matrixV() * I * svd.matrixU().transpose();
+  // The final transform
+  A.linear() = scale * R;
+  A.translation() = scale*(out_ctr - R*in_ctr);
+  // Success
+  return true;
+}
 
 // Get the average of a vector of doubles
 bool Mean(std::vector<double> const& v, double & d) {
@@ -280,16 +312,17 @@ bool Solve() {
   // house in a way that projects one pose sequence into the other.
   {
     ROS_INFO("Estimating master -> slave lighthouse transforms.");
-    // Define a NLS problem
-    ceres::Problem problem;
-    ceres::Solver::Summary summary;
     // Add residual blocks to the problem
     LighthouseMap::iterator lm = lighthouses_.begin();  // First is master
     LighthouseMap::iterator lt;                         //
     for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
       // Master lighthouse
-      for (size_t i = 0; i < 6; i++)
+      for (size_t i = 0; i < 6; i++) {
         lt->second.vTl[0] = 0;
+        continue;
+      }
+      // Correspondences
+      std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> corr;
       // Slave lighthouse
       if (lt != lighthouses_.begin()) {
         TrackerMap::iterator tt;
@@ -300,36 +333,42 @@ bool Solve() {
             if (pt->second.find(lt->first) == pt->second.end() ||
                 pt->second.find(lm->first) == pt->second.end()) continue;
             // If we get here, then we have a correspondence
-            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
-              TransformCost, 6, 6, 6, 6>(new TransformCost());
-            // Add a residual block to represent this measurement
-            problem.AddResidualBlock(cost, new ceres::CauchyLoss(0.5),
-              reinterpret_cast<double*>(lt->second.vTl),          // mTs
-              reinterpret_cast<double*>(pt->second[lm->first]),   // mTt
-              reinterpret_cast<double*>(pt->second[lt->first]));  // sTt
-            // Make sure we mark the poses as constant
-            problem.SetParameterBlockConstant(pt->second[lm->first]);
-            problem.SetParameterBlockConstant(pt->second[lt->first]);
+            corr.push_back(std::pair<Eigen::Vector3d, Eigen::Vector3d>(
+              Eigen::Vector3d(
+                pt->second[lt->first][0],
+                pt->second[lt->first][1],
+                pt->second[lt->first][2]
+              ),
+              Eigen::Vector3d(
+                pt->second[lm->first][0],
+                pt->second[lm->first][1],
+                pt->second[lm->first][2])
+              )
+            );
           }
         }
       }
-    }
-    // Solve the problem
-    ceres::Solve(options_, &problem, &summary);
-    if (summary.IsSolutionUsable()) {
-      ROS_INFO("- Solution found");
-      LighthouseMap::iterator lt;
-      for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
-        double d = std::sqrt(
-          lt->second.vTl[0]  * lt->second.vTl[0] +
-          lt->second.vTl[1]  * lt->second.vTl[1] +
-          lt->second.vTl[2]  * lt->second.vTl[2]);
-        ROS_INFO_STREAM(lt->first << ": " << lt->second.vTl[0] << " " <<
-          lt->second.vTl[1] << " " << lt->second.vTl[2] << " (" << d << "m)");
+      // Run kabsch to determine the projection from the slave to master
+      Eigen::Matrix<double, 3, Eigen::Dynamic> pti(3, corr.size());
+      Eigen::Matrix<double, 3, Eigen::Dynamic> ptj(3, corr.size());
+      for (size_t i = 0; i < corr.size(); i++) {
+        pti.block<3, 1>(0, i) = corr[i].first;
+        ptj.block<3, 1>(0, i) = corr[i].second;
       }
-    }
-    else {
-      ROS_INFO("- Solution not found");
+      // Perform a KABSCH transform on the two matrices
+      Eigen::Affine3d A;
+      if (Kabsch<double>(pti, ptj, A, false))
+        ROS_INFO_STREAM("- Solution " << A.translation().norm());
+      else
+        ROS_INFO("- Solution not found");
+      // Write the solution
+      lt->second.vTl[0] = A.translation()[0];
+      lt->second.vTl[1] = A.translation()[1];
+      lt->second.vTl[2] = A.translation()[2];
+      Eigen::AngleAxisd aa(A.linear());
+      lt->second.vTl[3] =  aa.angle() * aa.axis()[0];
+      lt->second.vTl[4] =  aa.angle() * aa.axis()[1];
+      lt->second.vTl[5] =  aa.angle() * aa.axis()[2];
     }
   }
   // We now have the correct sens
@@ -563,17 +602,6 @@ int main(int argc, char **argv) {
   // Whether to apply light corrections
   if (!nh.getParam("correct", correct_))
     ROS_FATAL("Failed to get correct parameter.");
-
-  // Define the ceres problem
-  options_.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  if (!nh.getParam("solver/max_time", options_.max_solver_time_in_seconds))
-    ROS_FATAL("Failed to get the solver/max_time parameter.");
-  if (!nh.getParam("solver/max_iterations", options_.max_num_iterations))
-    ROS_FATAL("Failed to get the solver/max_iterations parameter.");
-  if (!nh.getParam("solver/threads", options_.num_threads))
-    ROS_FATAL("Failed to get the solver/threads parameter.");
-  if (!nh.getParam("solver/debug", options_.minimizer_progress_to_stdout))
-    ROS_FATAL("Failed to get the solver/debug parameter.");
 
   // Visualization option
   if (!nh.getParam("visualize", visualize_))
