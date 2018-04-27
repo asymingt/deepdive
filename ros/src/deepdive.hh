@@ -97,7 +97,7 @@ bool ReadConfig(std::string const& calfile,   // Calibration file
   std::string const& frame_vive,              // Vive frame name
   std::string const& frame_body,              // Body frame name
   double registration[6],
-  LighthouseMap lighthouses, TrackerMap trackers);
+  LighthouseMap & lighthouses, TrackerMap & trackers);
 
 // Write a human-readable configuration
 bool WriteConfig(std::string const& calfile,    // Calibration file

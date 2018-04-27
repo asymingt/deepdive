@@ -61,6 +61,15 @@ double thresh_duration_ = 1.0;
 // Solver parameters
 ceres::Solver::Options options_;
 
+// What to solve for
+bool refine_registration_ = true;
+bool refine_lighthouses_ = false;
+bool refine_trajectory_ = false;
+bool refine_extrinsics_ = false;
+bool refine_sensors_ = false;
+bool refine_head_ = false;
+bool refine_params_ = false;
+
 // Are we running in "offline" mode
 bool offline_ = false;
 
@@ -79,7 +88,6 @@ double registration_[6];
 // Sensor visualization publisher
 ros::Publisher pub_sensors_;
 ros::Publisher pub_path_;
-ros::Publisher pub_corr_;
 
 // Timer for managing offline
 ros::Timer timer_;
@@ -202,6 +210,31 @@ struct CorrectionCost {
   double wTb_[6];
 };
 
+// Residual error between sequential poses
+struct MotionCost {
+  explicit MotionCost() {}
+  // Called by ceres-solver to calculate error
+  template <typename T>
+  bool operator()(const T* const prev_pos_xy,  // PREV Body -> world (pos xy)
+                  const T* const prev_pos_z,   // PREV Body -> world (pos z)
+                  const T* const prev_rot_xy,  // PREV Body -> world (rot xy)
+                  const T* const prev_rot_z,   // PREV Body -> world (rot z)
+                  const T* const next_pos_xy,  // NEXT Body -> world (pos xy)
+                  const T* const next_pos_z,   // NEXT Body -> world (pos z)
+                  const T* const next_rot_xy,  // NEXT Body -> world (rot xy)
+                  const T* const next_rot_z,   // NEXT Body -> world (rot z)
+                  T* residual) const {
+    residual[0] =  prev_pos_xy[0] - next_pos_xy[0];
+    residual[1] =  prev_pos_xy[1] - next_pos_xy[1];
+    residual[2] =  prev_pos_z[0] - next_pos_z[0];
+    residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
+    residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
+    residual[5] =  prev_rot_z[0] - next_rot_z[0];
+    return true;
+  }
+};
+
+// Solve the problem
 bool Solve() {
   // Create the ceres problem
   ceres::Problem problem;
@@ -327,9 +360,28 @@ bool Solve() {
               reinterpret_cast<double*>(tt->second.sensors),
               reinterpret_cast<double*>(lt->second.params));
           }
+          // If we have a previous node, then link with a motion cost
+          std::map<ros::Time, double[6]>::iterator curr = wTb.find(bt->first);
+          std::map<ros::Time, double[6]>::iterator prev = std::prev(curr);
+          if (prev != wTb.end() && prev != curr) {
+            // Create a cost function to represent motion
+            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+                  <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
+            // Add a residual block for error
+            problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+              reinterpret_cast<double*>(&prev->second[0]),  // pos: xy
+              reinterpret_cast<double*>(&prev->second[2]),  // pos: z
+              reinterpret_cast<double*>(&prev->second[3]),  // rot: xy
+              reinterpret_cast<double*>(&prev->second[5]),  // rot: z
+              reinterpret_cast<double*>(&wTb[bt->first][0]),      // pos: xy
+              reinterpret_cast<double*>(&wTb[bt->first][2]),      // pos: z
+              reinterpret_cast<double*>(&wTb[bt->first][3]),      // rot: xy
+              reinterpret_cast<double*>(&wTb[bt->first][5]));     // rot: z
+          }
           // If we have no corrections, then make the first 
           if (corr.empty()) {
             if (!fixed) {
+              ROS_INFO_STREAM("- Adding fixed initial position");
               for (size_t i = 0; i < 6; i++)
                 wTb[bt->first][i] = 0.0;
               problem.SetParameterBlockConstant(&wTb[bt->first][0]);
@@ -355,14 +407,22 @@ bool Solve() {
           }
         }
         // Fix lighthouse parameters
-        problem.SetParameterBlockConstant(lt->second.vTl);
-        problem.SetParameterBlockConstant(lt->second.params);
+        if (!refine_params_)
+          problem.SetParameterBlockConstant(lt->second.params);
+        if (!refine_lighthouses_)
+          problem.SetParameterBlockConstant(lt->second.vTl);
       }
       // Fix tracker parameters 
-      problem.SetParameterBlockConstant(tt->second.bTh);
-      problem.SetParameterBlockConstant(tt->second.tTh);
-      problem.SetParameterBlockConstant(tt->second.sensors);
+      if (!refine_extrinsics_)
+        problem.SetParameterBlockConstant(tt->second.bTh);
+      if (!refine_head_)
+        problem.SetParameterBlockConstant(tt->second.tTh);
+      if (!refine_sensors_)
+        problem.SetParameterBlockConstant(tt->second.sensors);
     }
+    // Fix global parameters
+    if (!refine_registration_)
+      problem.SetParameterBlockConstant(registration_);
     // Now solve the problem
     ceres::Solver::Summary summary;
     ceres::Solve(options_, &problem, &summary);
@@ -395,8 +455,17 @@ bool Solve() {
         }
         pub_path_.publish(msg);
       }
+      // Update transforms
+      SendTransforms(frame_world_, frame_vive_, frame_body_,
+        registration_, lighthouses_, trackers_);
+        // Write the solution to a config file
+      if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
+        registration_, lighthouses_, trackers_))
+        ROS_INFO_STREAM("- Calibration written to " << calfile_);
+      else
+        ROS_WARN_STREAM("- Calibration could not be written to " << calfile_);
     } else {
-      ROS_INFO("- Solution is not usable.");
+      ROS_WARN("- Solution is not usable.");
       return false;
     }
   }
@@ -585,9 +654,24 @@ int main(int argc, char **argv) {
   if (!nh.getParam("force2d", force2d_))
     ROS_FATAL("Failed to get force2d parameter.");
 
+  // What to refine
+  if (!nh.getParam("refine/registration", refine_registration_))
+    ROS_FATAL("Failed to get refine/registration parameter.");
+  if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
+    ROS_FATAL("Failed to get refine/lighthouses parameter.");
+  if (!nh.getParam("refine/trajectory", refine_trajectory_))
+    ROS_FATAL("Failed to get refine/trajectory parameter.");
+  if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
+    ROS_FATAL("Failed to get refine/extrinsics parameter.");
+  if (!nh.getParam("refine/sensors", refine_sensors_))
+    ROS_FATAL("Failed to get refine/sensors parameter.");
+  if (!nh.getParam("refine/head", refine_head_))
+    ROS_FATAL("Failed to get refine/head parameter.");
+  if (!nh.getParam("refine/params", refine_params_))
+    ROS_FATAL("Failed to get refine/params parameter.");
+
   // Define the ceres problem
   options_.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  options_.function_tolerance = 1e-12;
   if (!nh.getParam("solver/max_time", options_.max_solver_time_in_seconds))
     ROS_FATAL("Failed to get the solver/max_time parameter.");
   if (!nh.getParam("solver/max_iterations", options_.max_num_iterations))
@@ -696,8 +780,6 @@ int main(int argc, char **argv) {
     nh.advertise<visualization_msgs::MarkerArray>("/sensors", 10, true);
   pub_path_ =
     nh.advertise<nav_msgs::Path>("/path", 10, true);
-  pub_corr_ =
-    nh.advertise<nav_msgs::Path>("/corr", 10, true);
 
   // Setup a timer to automatically trigger solution on end of experiment
   timer_ = nh.createTimer(ros::Duration(1.0), TimerCallback, true, false);

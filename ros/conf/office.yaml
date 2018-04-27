@@ -29,7 +29,7 @@ frames:
 thresholds:
   count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         1.00       # Threshold on duration (in microsecs)
+  duration:         10.00      # Threshold on duration (in microsecs)
 
 # Publish rviz markers for the sensors
 visualize:          true
@@ -62,6 +62,16 @@ resolution:         0.1
 
 # Force z, roll and pitch to be constant when solving
 force2d:            false
+
+# What else to refine, besides the lighthouse and sensor positions
+refine:
+  registration:     true
+  lighthouses:      false      # Refine lighthouse positions
+  trajectory:       false      # If false we will use the corrections
+  extrinsics:       false      # If false tracker frame is the body frame
+  sensors:          false      # Refine sensor positions
+  params:           false      # Refine lighthouse parameters
+  head:             false      # Refine head transform
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:

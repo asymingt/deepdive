@@ -106,7 +106,7 @@ bool ReadConfig(std::string const& calfile,   // Calibration file
   std::string const& frame_vive,              // Vive frame name
   std::string const& frame_body,              // Body frame name
   double registration[6],
-  LighthouseMap lighthouses, TrackerMap trackers) {
+  LighthouseMap & lighthouses, TrackerMap & trackers) {
   // Entries take the form x y z qx qy qz qw parent child
   std::ifstream infile(calfile);
   if (!infile.is_open()) {
@@ -123,6 +123,7 @@ bool ReadConfig(std::string const& calfile,   // Calibration file
       ROS_ERROR("Badly formatted config file");
       return false;
     }
+    // ROS_INFO_STREAM(p << " -> " << c);
     Eigen::AngleAxisd aa(Eigen::Quaterniond(qw, qx, qy, qz));
     if (p == frame_world && c == frame_vive) {
       registration[0] = x;
