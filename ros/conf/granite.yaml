@@ -22,20 +22,20 @@
 frames:
   world:            "world"
   vive:             "vive"
-  body:             "truth"
-  estimate:         "body"
+  truth:            "truth"
+  body:             "body"
 
 # Thresholds used to reject measurements
 thresholds:
   count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         10.00      # Threshod on duration (in microsecs)
+  duration:         1.00       # Threshold on duration (in microsecs)
 
 # Publish rviz markers for the sensors
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            true
+correct:            false
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -59,21 +59,25 @@ tracker_stbd:
   serial:          "LHR-08DDBC05"
   transform:       [0.000,  0.1425, -0.162, -0.7071,  0.0000,  0.0000,  0.7071]
 
-# CALIBRATION OPTIONS
-
-# Calibration resolution
+# Registration and calibration bundle resolution
 resolution:         0.1
 
-# What else to refine, besides the lighthouse / sensor positions
+# REGISTRATION OPTIONS
+
+# Force z, roll and pitch to be constant when solving
+force2d:            true
+
+# If forcing 2d, what is the height (roll and pitch will be zero)
+height:             0.0
+
+# What else to refine, besides the trajectory
 refine:
+  registration:     true       # World - > vive
+  lighthouses:      true       # Refine lighthouse positions
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
-
-# Relative weighting of measurements
-weight:
-  light:            1.0e-06    # 1mm over 10m
-  motion:           1.0        # 1m/s velocity uncertainty
+  head:             false      # Refine head transform
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
@@ -82,7 +86,7 @@ solver:
   threads:          4          # Number of threads
   debug:            true       # Provide debug output?
 
-# TRACKER PARAMETERS
+# TRACKER OPTIONS
 
 # Topics for publishing data
 topics:
@@ -94,19 +98,19 @@ topics:
 # Fixed tracking rate
 rate:               62.5
 
-# Gravity vector in parent frame
+# Gravity vector in world frame
 gravity:            [0.0, 0.0, 9.80665]
 
 # Which measurements to use
 use:
-  gyroscope:        true
-  accelerometer:    true
-  light:            false
+  gyroscope:        false
+  accelerometer:    false
+  light:            true
 
 # Initial state value
 initial_estimate:
-  position:         [0.5, 0.5, -0.7]
-  attitude:         [0, 0, 0.70710678, -0.70710678]
+  position:         [0, 0, 0]
+  attitude:         [0, 0, 0, 1]
   velocity:         [0, 0, 0]
   omega:            [0, 0, 0]
   acceleration:     [0, 0, 0]

@@ -81,6 +81,9 @@ bool recording_ = false;
 // Force the body frame to move on a plane
 bool force2d_ = false;
 
+// Constant height
+double height_;
+
 // World -> vive registration
 double registration_[6];
 
@@ -170,8 +173,8 @@ struct GroupCost {
         angle[a] += T(params[a*NUM_PARAMS + PARAM_PHASE]);
         angle[a] += T(params[a*NUM_PARAMS + PARAM_TILT]) * angle[1-a];
         angle[a] += T(params[a*NUM_PARAMS + PARAM_CURVE]) * angle[1-a] * angle[1-a];
-        angle[a] += T(params[a*NUM_PARAMS + PARAM_GIB_MAG]) * cos(angle[1-a] 
-          + T(params[a*NUM_PARAMS + PARAM_GIB_PHASE]));
+        angle[a] += T(params[a*NUM_PARAMS + PARAM_GIB_MAG]) * sin(angle[a] 
+                    + T(params[a*NUM_PARAMS + PARAM_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
       residual[cnt++] = angle[a] - T(gt->second);
@@ -361,6 +364,14 @@ bool Solve() {
               reinterpret_cast<double*>(tt->second.tTh),
               reinterpret_cast<double*>(tt->second.sensors),
               reinterpret_cast<double*>(lt->second.params));
+            // If we are forcing 2D add some constraints...
+            if (force2d_) {
+              wTb[bt->first][2] = height_;
+              wTb[bt->first][3] = 0.0;
+              wTb[bt->first][4] = 0.0;
+              problem.SetParameterBlockConstant(&wTb[bt->first][2]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][3]);
+            }
           }
           // If we have a previous node, then link with a motion cost
           std::map<ros::Time, double[6]>::iterator curr = wTb.find(bt->first);
@@ -655,6 +666,10 @@ int main(int argc, char **argv) {
   // Whether to apply light corrections
   if (!nh.getParam("force2d", force2d_))
     ROS_FATAL("Failed to get force2d parameter.");
+
+  // Whether to apply light corrections
+  if (!nh.getParam("height", height_))
+    ROS_FATAL("Failed to get height parameter.");
 
   // What to refine
   if (!nh.getParam("refine/registration", refine_registration_))

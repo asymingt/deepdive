@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            true
+correct:            false
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -61,7 +61,10 @@ resolution:         0.1
 # REGISTRATION OPTIONS
 
 # Force z, roll and pitch to be constant when solving
-force2d:            false
+force2d:            true
+
+# If forcing 2d, what is the height (roll and pitch will be zero)
+height:             0.0
 
 # What else to refine, besides the trajectory
 refine:
@@ -91,19 +94,19 @@ topics:
 # Fixed tracking rate
 rate:               62.5
 
-# Gravity vector in parent frame
+# Gravity vector in world frame
 gravity:            [0.0, 0.0, 9.80665]
 
 # Which measurements to use
 use:
-  gyroscope:        true
-  accelerometer:    true
-  light:            false
+  gyroscope:        false
+  accelerometer:    false
+  light:            true
 
 # Initial state value
 initial_estimate:
-  position:         [0.5, 0.5, -0.7]
-  attitude:         [0, 0, 0.70710678, -0.70710678]
+  position:         [0, 0, 0]
+  attitude:         [0, 0, 0, 1]
   velocity:         [0, 0, 0]
   omega:            [0, 0, 0]
   acceleration:     [0, 0, 0]

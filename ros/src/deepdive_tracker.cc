@@ -115,6 +115,13 @@ Eigen::Vector3d imu_proc_gs_;        // Process noise: Gyro scale
 
 // GLOBAL DATA STRUCTURES
 
+std::string calfile_ = "deepdive.tf2";
+std::string frame_world_ = "world";     // World frame
+std::string frame_vive_ = "vive";       // Vive frame
+std::string frame_body_ = "body";       // EKF / external solution
+std::string frame_truth_ = "truth";     // Vive solution
+
+
 LighthouseMap lighthouses_;          // List of lighthouses
 TrackerMap trackers_;                // List of trackers
 ErrorMap errors_;                    // List of error filters
@@ -128,6 +135,7 @@ double thresh_duration_ = 1.0;       // Duration threshold in micorseconds
 bool use_gyroscope_ = true;          // Input measurements from gyroscope
 bool use_accelerometer_ = true;      // Input measurements from accelerometer
 bool use_light_ = true;              // Input measurements from light
+double registration_[6];             // World -> vive
 
 // ROS publishers
 ros::Publisher pub_pose_;
@@ -141,7 +149,8 @@ Eigen::Vector3d obs_cov_gyr_;        // Measurement covariance: Gyroscope
 double obs_cov_ang_;                 // Measurement covariance: Angle
 
 // Intermediary data
-TransformMap wTl_;                   // ALL: world -> lighthouse
+Eigen::Affine3d wTv_;                // ALL: world -> vive
+TransformMap vTl_;                   // ALL: vive -> lighthouse
 TransformMap bTh_;                   // ALL: head -> body
 TransformMap tTh_;                   // ALL: head -> tracking
 TransformMap tTi_;                   // ALL: imu -> tracking
@@ -224,7 +233,8 @@ namespace UKF {
     Eigen::Affine3d wTb;
     wTb.translation() = state.get_field<Position>();
     wTb.linear() = state.get_field<Attitude>().toRotationMatrix();
-    UKF::Vector<3> x = wTl_[context.lighthouse].inverse()  // world -> lh
+    UKF::Vector<3> x = wTv_.inverse()                      // world -> vive
+                     * vTl_[context.lighthouse].inverse()  // vive -> lh
                      * wTb                                 // body -> world
                      * bTh_[context.tracker]               // head -> body
                      * tTh_[context.tracker].inverse()     // tracker -> head
@@ -234,12 +244,12 @@ namespace UKF {
     angles[1] = std::atan2(x[1], x[2]);
     uint8_t const& a = context.axis;
     if (correct_) {
-      double const * const params = lighthouses_[context.lighthouse].params[a];
-      angles[a] -= params[PARAM_PHASE];
-      angles[a] -= params[PARAM_TILT] * angles[1-a];
-      angles[a] -= params[PARAM_CURVE] * angles[1-a] * angles[1-a];
-      angles[a] -= params[PARAM_GIB_MAG] *
-        std::cos(angles[1-a] + params[PARAM_GIB_PHASE]);
+      double const * const params = lighthouses_[context.lighthouse].params;
+      angles[a] += params[NUM_PARAMS*a + PARAM_PHASE];
+      angles[a] += params[NUM_PARAMS*a + PARAM_TILT] * angles[1-a];
+      angles[a] += params[NUM_PARAMS*a + PARAM_CURVE] * angles[1-a] * angles[1-a];
+      angles[a] += params[NUM_PARAMS*a + PARAM_GIB_MAG] *
+        std::cos(angles[1-a] + params[NUM_PARAMS*a + PARAM_GIB_PHASE]);
     }
     return angles[a];
   }
@@ -452,8 +462,8 @@ void TimerCallback(ros::TimerEvent const& info) {
   static tf2_ros::TransformBroadcaster br;
   geometry_msgs::TransformStamped tfs;
   tfs.header.stamp = now;
-  tfs.header.frame_id = frame_parent_;
-  tfs.child_frame_id = frame_child_;
+  tfs.header.frame_id = frame_world_;
+  tfs.child_frame_id = frame_truth_;
   tfs.transform.translation.x = filter_.state.get_field<Position>()[0];
   tfs.transform.translation.y = filter_.state.get_field<Position>()[1];
   tfs.transform.translation.z = filter_.state.get_field<Position>()[2];
@@ -466,7 +476,7 @@ void TimerCallback(ros::TimerEvent const& info) {
   // Broadcast the pose with covariance
   geometry_msgs::PoseWithCovarianceStamped pwcs;
   pwcs.header.stamp = now;
-  pwcs.header.frame_id = frame_parent_;
+  pwcs.header.frame_id = frame_world_;
   pwcs.pose.pose.position.x = filter_.state.get_field<Position>()[0];
   pwcs.pose.pose.position.y = filter_.state.get_field<Position>()[1];
   pwcs.pose.pose.position.z = filter_.state.get_field<Position>()[2];
@@ -482,7 +492,7 @@ void TimerCallback(ros::TimerEvent const& info) {
   // Broadcast the twist with covariance
   geometry_msgs::TwistWithCovarianceStamped twcs;
   twcs.header.stamp = now;
-  twcs.header.frame_id = frame_child_;
+  twcs.header.frame_id = frame_world_;
   twcs.twist.twist.linear.x = filter_.state.get_field<Velocity>()[0];
   twcs.twist.twist.linear.y = filter_.state.get_field<Velocity>()[1];
   twcs.twist.twist.linear.z = filter_.state.get_field<Velocity>()[2];
@@ -526,7 +536,7 @@ Eigen::Affine3d AngleAxisToTransform(double data[6]) {
 void NewLighthouseCallback(LighthouseMap::iterator lighthouse) {
   ROS_INFO_STREAM("Found lighthouse " << lighthouse->first);
   // Initialize
-  wTl_[lighthouse->first] = AngleAxisToTransform(lighthouse->second.wTl);
+  vTl_[lighthouse->first] = AngleAxisToTransform(lighthouse->second.vTl);
   // Check if we have got all info from lighthouses and trackers
   CheckIfReadyToTrack();
 }
@@ -607,9 +617,18 @@ int main(int argc, char **argv) {
   ros::NodeHandle nh("~");
 
   // Get the parent information
-  std::string calfile;
-  if (!nh.getParam("calfile", calfile))
+  if (!nh.getParam("calfile", calfile_))
     ROS_FATAL("Failed to get the calfile file.");
+
+  // Get some global information
+  if (!nh.getParam("frames/world", frame_world_))
+    ROS_FATAL("Failed to get frames/world parameter.");
+  if (!nh.getParam("frames/vive", frame_vive_))
+    ROS_FATAL("Failed to get frames/vive parameter.");
+  if (!nh.getParam("frames/body", frame_body_))
+    ROS_FATAL("Failed to get frames/body parameter.");
+  if (!nh.getParam("frames/truth", frame_truth_))
+    ROS_FATAL("Failed to get frames/truth parameter.");
 
   // Get the parent information
   std::vector<std::string> lighthouses;
@@ -633,12 +652,12 @@ int main(int argc, char **argv) {
       transform[4],  // qy
       transform[5]); // qz
     Eigen::AngleAxisd aa(q);
-    lighthouses_[serial].wTl[0] = transform[0];
-    lighthouses_[serial].wTl[1] = transform[1];
-    lighthouses_[serial].wTl[2] = transform[2];
-    lighthouses_[serial].wTl[3] = aa.angle() * aa.axis()[0];
-    lighthouses_[serial].wTl[4] = aa.angle() * aa.axis()[1];
-    lighthouses_[serial].wTl[5] = aa.angle() * aa.axis()[2];
+    lighthouses_[serial].vTl[0] = transform[0];
+    lighthouses_[serial].vTl[1] = transform[1];
+    lighthouses_[serial].vTl[2] = transform[2];
+    lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
+    lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
+    lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
     lighthouses_[serial].ready = false;
   }
 
@@ -651,33 +670,27 @@ int main(int argc, char **argv) {
     std::string serial;
     if (!nh.getParam(*jt + "/serial", serial))
       ROS_FATAL("Failed to get the tracker serial.");
-    std::vector<double> transform;
-    if (!nh.getParam(*jt + "/transform", transform))
-      ROS_FATAL("Failed to get the tracker transform.");
-    if (transform.size() != 7) {
-      ROS_FATAL("Failed to parse tracker transform.");
+    std::vector<double> extrinsics;
+    if (!nh.getParam(*jt + "/extrinsics", extrinsics))
+      ROS_FATAL("Failed to get the tracker extrinsics.");
+    if (extrinsics.size() != 7) {
+      ROS_FATAL("Failed to parse tracker extrinsics.");
       continue;
     }
     Eigen::Quaterniond q(
-      transform[6],  // qw
-      transform[3],  // qx
-      transform[4],  // qy
-      transform[5]); // qz
+      extrinsics[6],  // qw
+      extrinsics[3],  // qx
+      extrinsics[4],  // qy
+      extrinsics[5]); // qz
     Eigen::AngleAxisd aa(q);
-    trackers_[serial].bTh[0] = transform[0];
-    trackers_[serial].bTh[1] = transform[1];
-    trackers_[serial].bTh[2] = transform[2];
+    trackers_[serial].bTh[0] = extrinsics[0];
+    trackers_[serial].bTh[1] = extrinsics[1];
+    trackers_[serial].bTh[2] = extrinsics[2];
     trackers_[serial].bTh[3] = aa.angle() * aa.axis()[0];
     trackers_[serial].bTh[4] = aa.angle() * aa.axis()[1];
     trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];
     trackers_[serial].ready = false;
   }
-
-  // Get the frame names for Tf2
-  if (!nh.getParam("frames/parent", frame_parent_))
-    ROS_FATAL("Failed to get frames/parent parameter.");
-  if (!nh.getParam("frames/child", frame_child_))
-    ROS_FATAL("Failed to get frames/child parameter.");
 
   // Get the topics for data topics
   std::string topic_pose, topic_twist;
@@ -823,12 +836,17 @@ int main(int argc, char **argv) {
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
-  if (ReadConfig(calfile, lighthouses_, trackers_)) {
+  if (ReadConfig(calfile_, frame_world_, frame_vive_, frame_body_,
+    registration_, lighthouses_, trackers_)) {
     ROS_INFO("Read transforms from calibration");
   } else {
     ROS_INFO("Could not read calibration file");
   }
-  SendTransforms(frame_parent_, frame_child_, lighthouses_, trackers_);
+  SendTransforms(frame_world_, frame_vive_, frame_body_,
+    registration_, lighthouses_, trackers_);
+
+  // Convert the registration info to a world transform
+  wTv_ = AngleAxisToTransform(registration_);
 
   // Markers showing sensor positions
   pub_pose_ = nh.advertise<geometry_msgs::PoseWithCovarianceStamped>

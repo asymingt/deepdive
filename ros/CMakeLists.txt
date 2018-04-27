@@ -65,10 +65,10 @@ cs_add_executable(deepdive_registration src/deepdive_registration.cc)
 target_link_libraries(deepdive_registration deepdive_core ${CERES_LIBRARIES})
 
 # Filter find the world pose of a soecific tracker
-# cs_add_executable(deepdive_tracker src/deepdive_tracker.cc)
-# target_compile_definitions(deepdive_tracker PRIVATE -DUKF_DOUBLE_PRECISION)
-# target_link_libraries(deepdive_tracker deepdive_core ${CERES_LIBRARIES})
-# add_dependencies(deepdive_tracker ukf)
+cs_add_executable(deepdive_tracker src/deepdive_tracker.cc)
+target_compile_definitions(deepdive_tracker PRIVATE -DUKF_DOUBLE_PRECISION)
+target_link_libraries(deepdive_tracker deepdive_core)
+add_dependencies(deepdive_tracker ukf)
 
 # Install products
 cs_install()
