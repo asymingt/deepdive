@@ -64,7 +64,6 @@ ceres::Solver::Options options_;
 // What to solve for
 bool refine_registration_ = true;
 bool refine_lighthouses_ = false;
-bool refine_trajectory_ = false;
 bool refine_extrinsics_ = false;
 bool refine_sensors_ = false;
 bool refine_head_ = false;
@@ -328,6 +327,9 @@ bool Solve() {
     for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
       LighthouseMap::iterator lt;                         //
       for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+        if (lt == lighthouses_.begin())
+          for (size_t i = 0; i < 6; i++)
+            lt->second.vTl[i] = 0.0;
         Bundle::iterator bt = bundle[tt->first][lt->first].begin();
         for (; bt != bundle[tt->first][lt->first].end(); bt++) {
           // Merge all bundled data into a group
@@ -407,10 +409,10 @@ bool Solve() {
           }
         }
         // Fix lighthouse parameters
+        if (!refine_lighthouses_ || lt == lighthouses_.begin())
+          problem.SetParameterBlockConstant(lt->second.vTl);
         if (!refine_params_)
           problem.SetParameterBlockConstant(lt->second.params);
-        if (!refine_lighthouses_)
-          problem.SetParameterBlockConstant(lt->second.vTl);
       }
       // Fix tracker parameters 
       if (!refine_extrinsics_)
@@ -659,8 +661,6 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get refine/registration parameter.");
   if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
     ROS_FATAL("Failed to get refine/lighthouses parameter.");
-  if (!nh.getParam("refine/trajectory", refine_trajectory_))
-    ROS_FATAL("Failed to get refine/trajectory parameter.");
   if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
     ROS_FATAL("Failed to get refine/extrinsics parameter.");
   if (!nh.getParam("refine/sensors", refine_sensors_))
