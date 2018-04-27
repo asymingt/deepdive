@@ -70,10 +70,10 @@ Visualization Manager:
           Value: true
         LHR-08DE963B/light:
           Value: true
+        body:
+          Value: true
         rviz:
           Value: false
-        truth:
-          Value: true
         vive:
           Value: true
         world:
@@ -211,10 +211,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: -0.0497962348
+      Pitch: 0.470203757
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.41000223
+      Yaw: 4.28000021
     Saved: ~
 Window Geometry:
   Displays:

@@ -1,9 +1,3 @@
-/*
-  This ROS node listens to data from all trackers in the system and provides
-  a global solution to the tracking problem. That is, it solves for the
-  relative location of the lighthouses and trackers as a function of time.
-*/
-
 // ROS includes
 #include <ros/ros.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -46,9 +40,10 @@ MeasurementMap measurements_;
 
 // Global strings
 std::string calfile_ = "deepdive.tf2";
-std::string frame_world_ = "world";
-std::string frame_vive_ = "vive";
-std::string frame_body_ = "truth";
+std::string frame_world_ = "world";     // World frame
+std::string frame_vive_ = "vive";       // Vive frame
+std::string frame_body_ = "body";       // EKF / external solution
+std::string frame_truth_ = "truth";     // Vive solution
 
 // Whether to apply corrections
 bool correct_ = false;
@@ -149,13 +144,6 @@ static bool Kabsch(
   return true;
 }
 
-// Get the average of a vector of doubles
-bool Mean(std::vector<double> const& v, double & d) {
-  if (v.empty()) return false;
-  d = std::accumulate(v.begin(), v.end(), 0.0) / v.size(); 
-  return true;
-}
-
 // Jointly solve
 bool Solve() {
   // Check that we have enough measurements
@@ -171,10 +159,6 @@ bool Solve() {
       << measurements_.rbegin()->first);
   }
 
-  // Keep a log of the data used
-  std::map<std::string, size_t> l_tally;
-  std::map<std::string, size_t> t_tally;
-  
   // Data storage for next step
 
   typedef std::map<ros::Time,             // Time
@@ -233,7 +217,6 @@ bool Solve() {
       TrackerMap::iterator tt;
       for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
         ROS_INFO_STREAM("- Slave " << lt->first << " and tracker " << tt->first);
-        tt->second.vTt.clear();
         // Iterate over time epochs
         Bundle::iterator bt;
         for (bt = bundle[tt->first][lt->first].begin();
@@ -253,11 +236,11 @@ bool Solve() {
             if (correct_) { 
               Lighthouse const& lh = lt->second;
               for (uint8_t a = 0; a < 2; a++) {
-                angles[a] -= lh.params[a][PARAM_PHASE];
-                angles[a] -= lh.params[a][PARAM_TILT] * angles[1-a];
-                angles[a] -= lh.params[a][PARAM_CURVE] * angles[1-a] * angles[1-a];
-                angles[a] -= lh.params[a][PARAM_GIB_MAG] 
-                  * std::cos(angles[1-a] + lh.params[a][PARAM_GIB_PHASE]);
+                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_PHASE];
+                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_TILT] * angles[1-a];
+                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_CURVE] * angles[1-a] * angles[1-a];
+                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_GIB_MAG] * std::cos(
+                  angles[1-a] + lh.params[a*NUM_PARAMS + PARAM_GIB_PHASE]);
               }
             }
             // Push on the correct world sensor position
@@ -371,7 +354,8 @@ bool Solve() {
       lt->second.vTl[5] =  aa.angle() * aa.axis()[2];
     }
   }
-  // We now have the correct sens
+  // We now have a great estimate of the slave -> master lighthous transforms,
+  // sensor trajectories, and global registration
   {
     SendTransforms(frame_world_, frame_vive_, frame_body_,
       registration_, lighthouses_, trackers_);
@@ -581,11 +565,13 @@ int main(int argc, char **argv) {
 
   // Get some global information
   if (!nh.getParam("frames/world", frame_world_))
-    ROS_FATAL("Failed to get frames/world parameter.");  
+    ROS_FATAL("Failed to get frames/world parameter.");
   if (!nh.getParam("frames/vive", frame_vive_))
-    ROS_FATAL("Failed to get frames/vive parameter.");  
+    ROS_FATAL("Failed to get frames/vive parameter.");
   if (!nh.getParam("frames/body", frame_body_))
-    ROS_FATAL("Failed to get frames/body parameter.");  
+    ROS_FATAL("Failed to get frames/body parameter.");
+  if (!nh.getParam("frames/truth", frame_truth_))
+    ROS_FATAL("Failed to get frames/truth parameter.");
 
   // Get the thresholds
   if (!nh.getParam("thresholds/count", thresh_count_))
@@ -625,12 +611,12 @@ int main(int argc, char **argv) {
     }
     Eigen::Quaterniond q(transform[6], transform[3], transform[4], transform[5]);
     Eigen::AngleAxisd aa(q);
-    // lighthouses_[serial].vTl[0] = transform[0];
-    // lighthouses_[serial].vTl[1] = transform[1];
-    // lighthouses_[serial].vTl[2] = transform[2];
-    // lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
-    // lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
-    // lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
+    lighthouses_[serial].vTl[0] = transform[0];
+    lighthouses_[serial].vTl[1] = transform[1];
+    lighthouses_[serial].vTl[2] = transform[2];
+    lighthouses_[serial].vTl[3] = aa.angle() * aa.axis()[0];
+    lighthouses_[serial].vTl[4] = aa.angle() * aa.axis()[1];
+    lighthouses_[serial].vTl[5] = aa.angle() * aa.axis()[2];
     lighthouses_[serial].ready = false;
   }
 
@@ -643,22 +629,18 @@ int main(int argc, char **argv) {
     std::string serial;
     if (!nh.getParam(*jt + "/serial", serial))
       ROS_FATAL("Failed to get the tracker serial.");
-    std::vector<double> transform;
-    if (!nh.getParam(*jt + "/transform", transform))
-      ROS_FATAL("Failed to get the tracker transform.");
-    if (transform.size() != 7) {
-      ROS_FATAL("Failed to parse tracker transform.");
+    std::vector<double> extrinsics;
+    if (!nh.getParam(*jt + "/extrinsics", extrinsics))
+      ROS_FATAL("Failed to get the tracker extrinsics.");
+    if (extrinsics.size() != 7) {
+      ROS_FATAL("Failed to parse tracker extrinsics.");
       continue;
     }
-    Eigen::Quaterniond q(
-      transform[6],  // qw
-      transform[3],  // qx
-      transform[4],  // qy
-      transform[5]); // qz
+    Eigen::Quaterniond q( extrinsics[6], extrinsics[3], extrinsics[4], extrinsics[5]);
     Eigen::AngleAxisd aa(q);
-    trackers_[serial].bTh[0] = transform[0];
-    trackers_[serial].bTh[1] = transform[1];
-    trackers_[serial].bTh[2] = transform[2];
+    trackers_[serial].bTh[0] = extrinsics[0];
+    trackers_[serial].bTh[1] = extrinsics[1];
+    trackers_[serial].bTh[2] = extrinsics[2];
     trackers_[serial].bTh[3] = aa.angle() * aa.axis()[0];
     trackers_[serial].bTh[4] = aa.angle() * aa.axis()[1];
     trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];

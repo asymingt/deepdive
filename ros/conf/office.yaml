@@ -22,8 +22,8 @@
 frames:
   world:            "world"
   vive:             "vive"
-  body:             "truth"
-  estimate:         "body"
+  truth:            "truth"
+  body:             "body"
 
 # Thresholds used to reject measurements
 thresholds:
@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -53,12 +53,15 @@ trackers:
   - "tracker_test"
 tracker_test:
   serial:          "LHR-08DE963B"
-  transform:       [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+  extrinsics:      [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
 
-# CALIBRATION OPTIONS
-
-# Calibration resolution
+# Registration and calibration bundle resolution
 resolution:         0.1
+
+# REGISTRATION OPTIONS
+
+# Force z, roll and pitch to be constant when solving
+force2d:            false
 
 # These are the parameters used by the non-linear least squares optimizer
 solver:
@@ -67,7 +70,7 @@ solver:
   threads:          4          # Number of threads
   debug:            true       # Provide debug output?
 
-# TRACKER PARAMETERS
+# TRACKER OPTIONS
 
 # Topics for publishing data
 topics:

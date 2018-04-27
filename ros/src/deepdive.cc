@@ -241,11 +241,16 @@ void LighthouseCallback(deepdive_ros::Lighthouses::ConstPtr const& msg,
     if (lighthouse == lighthouses.end())
       return;
     for (size_t i = 0; i < it->motors.size() && i < NUM_MOTORS; i++) {
-      lighthouse->second.params[i][PARAM_PHASE] = it->motors[i].phase;
-      lighthouse->second.params[i][PARAM_TILT] = it->motors[i].tilt;
-      lighthouse->second.params[i][PARAM_GIB_PHASE] = it->motors[i].gibphase;
-      lighthouse->second.params[i][PARAM_GIB_MAG] = it->motors[i].gibmag;
-      lighthouse->second.params[i][PARAM_CURVE] = it->motors[i].curve;
+      lighthouse->second.params[i*NUM_PARAMS + PARAM_PHASE]
+        = it->motors[i].phase;
+      lighthouse->second.params[i*NUM_PARAMS + PARAM_TILT]
+        = it->motors[i].tilt;
+      lighthouse->second.params[i*NUM_PARAMS + PARAM_GIB_PHASE]
+        = it->motors[i].gibphase;
+      lighthouse->second.params[i*NUM_PARAMS + PARAM_GIB_MAG]
+        = it->motors[i].gibmag;
+      lighthouse->second.params[i*NUM_PARAMS + PARAM_CURVE]
+        = it->motors[i].curve;
     }
     if (!lighthouse->second.ready) {
       lighthouse->second.ready = true;
@@ -353,4 +358,12 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
       cb(tracker);
     }
   }
+}
+
+// STATISTICS
+
+bool Mean(std::vector<double> const& v, double & d) {
+  if (v.empty()) return false;
+  d = std::accumulate(v.begin(), v.end(), 0.0) / v.size(); 
+  return true;
 }

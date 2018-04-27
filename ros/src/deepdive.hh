@@ -13,6 +13,7 @@
 
 // STL
 #include <string>
+#include <vector>
 #include <map>
 
 // Universal constants
@@ -48,7 +49,7 @@ enum Motors {
 // Lighthouse data structure
 struct Lighthouse {
   double vTl[6];
-  double params[NUM_MOTORS][NUM_PARAMS];
+  double params[NUM_MOTORS*NUM_PARAMS];
   bool ready;
 };
 typedef std::map<std::string, Lighthouse> LighthouseMap;
@@ -61,7 +62,6 @@ struct Tracker {
   double sensors[NUM_SENSORS*6];
   double errors[NUM_ERRORS][3];
   bool ready;
-  std::map<ros::Time, double[6]> vTt;   // Calibration only
 };
 typedef std::map<std::string, Tracker> TrackerMap;
 
@@ -153,6 +153,9 @@ class Statistics {
   double var_;
   double mean_;
 };
+
+// Get the average of a vector of doubles
+bool Mean(std::vector<double> const& v, double & d);
 
 #endif
 
