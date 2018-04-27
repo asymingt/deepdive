@@ -383,7 +383,7 @@ bool Solve() {
           // If we have no corrections, then make the first 
           if (corr.empty()) {
             if (!fixed) {
-              ROS_INFO_STREAM("- Adding fixed initial position");
+              ROS_INFO_STREAM("Adding fixed initial position");
               for (size_t i = 0; i < 6; i++)
                 wTb[bt->first][i] = 0.0;
               problem.SetParameterBlockConstant(&wTb[bt->first][0]);
@@ -429,7 +429,7 @@ bool Solve() {
     ceres::Solver::Summary summary;
     ceres::Solve(options_, &problem, &summary);
     if (summary.IsSolutionUsable()) {
-      ROS_INFO("- Usable solution found.");
+      ROS_INFO("Usable solution found.");
       if (visualize_) {
         nav_msgs::Path msg;
         msg.header.stamp = ros::Time::now();
@@ -463,11 +463,11 @@ bool Solve() {
         // Write the solution to a config file
       if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
         registration_, lighthouses_, trackers_))
-        ROS_INFO_STREAM("- Calibration written to " << calfile_);
+        ROS_INFO_STREAM("Calibration written to " << calfile_);
       else
-        ROS_WARN_STREAM("- Calibration could not be written to " << calfile_);
+        ROS_WARN_STREAM("Calibration could not be written to " << calfile_);
     } else {
-      ROS_WARN("- Solution is not usable.");
+      ROS_WARN("Solution is not usable.");
       return false;
     }
   }
