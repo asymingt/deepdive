@@ -78,26 +78,8 @@ Visualization Manager:
           Value: true
         body:
           Value: true
-        localization:
-          Value: true
         rviz:
           Value: false
-        top_aft:
-          Value: true
-        top_aft_arm_distal_link:
-          Value: true
-        top_aft_arm_proximal_link:
-          Value: true
-        top_aft_gripper_left_distal_link:
-          Value: true
-        top_aft_gripper_left_proximal_link:
-          Value: true
-        top_aft_gripper_right_distal_link:
-          Value: true
-        top_aft_gripper_right_proximal_link:
-          Value: true
-        truth:
-          Value: true
         vive:
           Value: true
         world:
@@ -109,10 +91,6 @@ Visualization Manager:
       Show Names: true
       Tree:
         world:
-          body:
-            {}
-          localization:
-            {}
           rviz:
             {}
           vive:
@@ -125,29 +103,6 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
-      Color: 0; 0; 255
-      Enabled: true
-      Head Diameter: 0.300000012
-      Head Length: 0.200000003
-      Length: 0.300000012
-      Line Style: Lines
-      Line Width: 0.0299999993
-      Name: path_port
-      Offset:
-        X: 0
-        Y: 0
-        Z: 0
-      Pose Color: 255; 85; 255
-      Pose Style: None
-      Radius: 0.0299999993
-      Shaft Diameter: 0.100000001
-      Shaft Length: 0.100000001
-      Topic: /path/tracker_port
-      Unreliable: false
-      Value: true
-    - Alpha: 1
-      Buffer Length: 1
-      Class: rviz/Path
       Color: 25; 255; 0
       Enabled: true
       Head Diameter: 0.300000012
@@ -155,7 +110,7 @@ Visualization Manager:
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: path_stbd
+      Name: Path
       Offset:
         X: 0
         Y: 0
@@ -165,24 +120,8 @@ Visualization Manager:
       Radius: 0.0299999993
       Shaft Diameter: 0.100000001
       Shaft Length: 0.100000001
-      Topic: /path/tracker_stbd
+      Topic: /path
       Unreliable: false
-      Value: true
-    - Class: rviz/MarkerArray
-      Enabled: true
-      Marker Topic: /sensors/tracker_port
-      Name: sensors_port
-      Namespaces:
-        {}
-      Queue Size: 100
-      Value: true
-    - Class: rviz/MarkerArray
-      Enabled: true
-      Marker Topic: /sensors/tracker_stbd
-      Name: sensors_stbd
-      Namespaces:
-        {}
-      Queue Size: 100
       Value: true
   Enabled: true
   Global Options:
@@ -224,10 +163,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Pitch: 0.699797153
+      Pitch: 0.704797149
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 4.22316647
+      Yaw: 4.40316963
     Saved: ~
 Window Geometry:
   Displays:
@@ -246,4 +185,4 @@ Window Geometry:
     collapsed: false
   Width: 1080
   X: 49
-  Y: 365
+  Y: 24

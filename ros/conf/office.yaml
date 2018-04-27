@@ -61,7 +61,7 @@ resolution:         0.1
 # REGISTRATION OPTIONS
 
 # Force z, roll and pitch to be constant when solving
-force2d:            true
+force2d:            false
 
 # If forcing 2d, what is the height (roll and pitch will be zero)
 height:             0.0

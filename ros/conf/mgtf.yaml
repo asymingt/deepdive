@@ -54,10 +54,10 @@ trackers:
   - "tracker_bottom"
 tracker_top:
   serial:          "LHR-09BB6B22"
-  transform:       [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+  extrinsics:      [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
 tracker_bottom:
   serial:          "LHR-09DF88FD"
-  transform:       [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+  extrinsics:      [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
 
 # CALIBRATION OPTIONS
 
