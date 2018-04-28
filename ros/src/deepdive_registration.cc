@@ -81,11 +81,11 @@ bool recording_ = false;
 // Force the body frame to move on a plane
 bool force2d_ = false;
 
-// Constant height
-double height_;
-
 // World -> vive registration
 double registration_[6];
+
+// Smoothing factor
+double smoothing_ = 10.0;
 
 // Sensor visualization publisher
 ros::Publisher pub_sensors_;
@@ -168,13 +168,13 @@ struct GroupCost {
       // Predict the angles
       angle[0] = atan2(x[0], x[2]);
       angle[1] = atan2(x[1], x[2]);
-      // Apply the correction
+      // Apply the correction - note the axis switch
       if (correct_) { 
-        angle[a] += T(params[a*NUM_PARAMS + PARAM_PHASE]);
-        angle[a] += T(params[a*NUM_PARAMS + PARAM_TILT]) * angle[1-a];
-        angle[a] += T(params[a*NUM_PARAMS + PARAM_CURVE]) * angle[1-a] * angle[1-a];
-        angle[a] += T(params[a*NUM_PARAMS + PARAM_GIB_MAG]) * sin(angle[a] 
-                    + T(params[a*NUM_PARAMS + PARAM_GIB_PHASE]));
+        angle[a] -= T(params[(1-a)*NUM_PARAMS + PARAM_PHASE]);
+        angle[a] -= T(params[(1-a)*NUM_PARAMS + PARAM_TILT]) * angle[1-a];
+        angle[a] -= T(params[(1-a)*NUM_PARAMS + PARAM_CURVE]) * angle[1-a] * angle[1-a];
+        angle[a] -= T(params[(1-a)*NUM_PARAMS + PARAM_GIB_MAG]) * sin(angle[a] 
+                  + T(params[(1-a)*NUM_PARAMS + PARAM_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
       residual[cnt++] = angle[a] - T(gt->second);
@@ -232,6 +232,8 @@ struct MotionCost {
     residual[3] =  prev_rot_xy[0] - next_rot_xy[0];
     residual[4] =  prev_rot_xy[1] - next_rot_xy[1];
     residual[5] =  prev_rot_z[0] - next_rot_z[0];
+    for (size_t i = 0; i < 6; i++)
+      residual[i] *= T(smoothing_);
     return true;
   }
 };
@@ -283,6 +285,8 @@ bool Solve() {
 
   std::map<ros::Time, double[6]> corr;
 
+  double height = 0.0;
+
   // We bundle measurements into into bins of width "resolution". This allows
   // us to take the average of the measurements to improve accuracy
   {
@@ -294,8 +298,9 @@ bool Solve() {
       size_t const& a = mt->second.light.axis;
       ros::Time t = ros::Time(round(mt->first.toSec() / res_) * res_);
       std::vector<deepdive_ros::Pulse>::iterator pt;
-      for (pt = mt->second.light.pulses.begin(); pt != mt->second.light.pulses.end(); pt++)
+      for (pt = mt->second.light.pulses.begin(); pt != mt->second.light.pulses.end(); pt++) {
         bundle[tserial][lserial][t][pt->sensor][a].push_back(pt->angle);
+      }
     }
     ROS_INFO("Bundling corrections into larger discrete time units.");
     CorrectionMap::iterator ct;
@@ -313,7 +318,11 @@ bool Solve() {
       corr[t][3] = aa.angle() * aa.axis()[0];
       corr[t][4] = aa.angle() * aa.axis()[1];
       corr[t][5] = aa.angle() * aa.axis()[2];
+      height += ct->second.transform.translation.z;
     }
+    if (!corrections_.empty())
+      height /= corrections_.size();
+    ROS_INFO_STREAM("Average height is " << height << " meters");
   }
 
   // CREATE PROBLEM
@@ -366,7 +375,7 @@ bool Solve() {
               reinterpret_cast<double*>(lt->second.params));
             // If we are forcing 2D add some constraints...
             if (force2d_) {
-              wTb[bt->first][2] = height_;
+              wTb[bt->first][2] = height;
               wTb[bt->first][3] = 0.0;
               wTb[bt->first][4] = 0.0;
               problem.SetParameterBlockConstant(&wTb[bt->first][2]);
@@ -520,7 +529,7 @@ void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
     return;
   std::vector<geometry_msgs::TransformStamped>::const_iterator it;
   for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
-    if (it->header.frame_id == frame_body_ &&
+    if (it->header.frame_id == frame_world_ &&
         it->child_frame_id == frame_body_) {
       corrections_[ros::Time::now()] = *it;
     }
@@ -668,8 +677,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get force2d parameter.");
 
   // Whether to apply light corrections
-  if (!nh.getParam("height", height_))
-    ROS_FATAL("Failed to get height parameter.");
+  if (!nh.getParam("smoothing", smoothing_))
+    ROS_FATAL("Failed to get smoothing parameter.");
 
   // What to refine
   if (!nh.getParam("refine/registration", refine_registration_))
@@ -765,12 +774,14 @@ int main(int argc, char **argv) {
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
+  /*
   if (ReadConfig(calfile_, frame_world_, frame_vive_, frame_body_,
     registration_, lighthouses_, trackers_)) {
     ROS_INFO("Read transforms from calibration");
   } else {
     ROS_INFO("Could not read calibration file");
   }
+  */
   SendTransforms(frame_world_, frame_vive_, frame_body_,
     registration_, lighthouses_, trackers_);
 

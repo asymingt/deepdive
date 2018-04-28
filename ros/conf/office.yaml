@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -61,10 +61,10 @@ resolution:         0.1
 # REGISTRATION OPTIONS
 
 # Force z, roll and pitch to be constant when solving
-force2d:            false
+force2d:            true
 
-# If forcing 2d, what is the height (roll and pitch will be zero)
-height:             0.0
+# Smoothing factor
+smoothing:          1.0
 
 # What else to refine, besides the trajectory
 refine:

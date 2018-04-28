@@ -29,13 +29,13 @@ frames:
 thresholds:
   count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         1.00       # Threshold on duration (in microsecs)
+  duration:         1.0        # Threshold on duration (in microsecs)
 
 # Publish rviz markers for the sensors
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -64,17 +64,18 @@ resolution:         0.1
 
 # REGISTRATION OPTIONS
 
-# Force z, roll and pitch to be constant when solving
+# Force z, roll and pitch to be constant when solving. The corrections will be
+# used to find the fixed height. If there are no corrections, it will be zero.
 force2d:            true
 
-# If forcing 2d, what is the height (roll and pitch will be zero)
-height:             -0.71
+# Smoothing factor
+smoothing:          1.0
 
 # What else to refine, besides the trajectory
 refine:
   registration:     true       # World - > vive
   lighthouses:      true       # Refine lighthouse positions
-  extrinsics:       true       # If false tracker frame is the body frame
+  extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
   head:             false      # Refine head transform
