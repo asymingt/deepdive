@@ -60,7 +60,7 @@ tracker_stbd:
   extrinsics:      [0.000,  0.1425, -0.162, -0.7071,  0.0000,  0.0000,  0.7071]
 
 # Registration and calibration bundle resolution
-resolution:         0.1
+resolution:         0.2
 
 # REGISTRATION OPTIONS
 
