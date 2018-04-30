@@ -171,8 +171,8 @@ struct Tracker {
 
 // Motor information
 typedef enum {
-  MOTOR_CCW_ABOUT_LH_Y = 0,   // Rotation counter-clockwise about LH frame Y
-  MOTOR_CW_ABOUT_LH_X = 1,    // Rotation clockwise about LH frame X
+  MOTOR_AXIS0 = 0,
+  MOTOR_AXIS1 = 1,
   MAX_NUM_MOTORS = 2
 } MotorType;
 

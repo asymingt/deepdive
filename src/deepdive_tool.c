@@ -49,12 +49,10 @@ void my_light_process(struct Tracker * tracker, struct Lighthouse * lighthouse,
   if (axis == 1 && enx_ == 0) return;
   // Print header info
   printf("[%u] # %s LH %s %s\n", synctime, tracker->serial, lighthouse->serial,
-    (axis == MOTOR_CCW_ABOUT_LH_Y ? "CCW ABOUT LH Y" : "CCW ABOUT LH X"));
+    (axis == MOTOR_AXIS0 ? "AXIS 0" : "AXIS 1"));
   // Print sensor info
   for (uint16_t i = 0; i < num_sensors; i++) {
     angcnv = (180.0 / 400000.0) * ((float)(angles[i]) - 200000.0);
-    if (axis == MOTOR_CW_ABOUT_LH_X)
-      angcnv = -angcnv;
     lencnv = ((float)lengths[i]) / 48000000.0 * 1000000.0;
     printf(" ->  SEN (%2u) ANG (%f deg) LEN (%f us)\n",
       sensors[i], angcnv, lencnv);

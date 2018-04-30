@@ -166,13 +166,13 @@ struct GroupCost {
       InverseTransformInPlace(wTv, x);    // world -> vive
       InverseTransformInPlace(vTl, x);    // vive -> lighthouse
       // Predict the angles - Note that the 
-      angle[0] = atan2(x[0], x[2]);
-      angle[1] = atan2(x[1], x[2]);
+      angle[0] =  atan2(x[0], x[2]);
+      angle[1] = -atan2(x[1], x[2]);
       // Apply the correction - note the axis switch
       if (correct_) { 
         angle[a] += T(params[(1-a)*NUM_PARAMS + PARAM_PHASE]);
         angle[a] += T(params[(1-a)*NUM_PARAMS + PARAM_TILT]) * angle[1-a];
-        angle[a] += T(params[(1-a)*NUM_PARAMS + PARAM_CURVE]) * pow(sin(angle[a])*cos(angle[1-a]),2.0);
+        angle[a] += T(params[(1-a)*NUM_PARAMS + PARAM_CURVE]) * pow(sin(angle[a])*cos(angle[1-a]), 2.0);
         //angle[a] += T(params[(1-a)*NUM_PARAMS + PARAM_GIB_MAG]) * sin(angle[a] - T(params[(1-a)*NUM_PARAMS + PARAM_GIB_PHASE]));
       }
       // The residual angle error for the specific axis
@@ -297,12 +297,8 @@ bool Solve() {
       size_t const& a = mt->second.light.axis;
       ros::Time t = ros::Time(round(mt->first.toSec() / res_) * res_);
       std::vector<deepdive_ros::Pulse>::iterator pt;
-      for (pt = mt->second.light.pulses.begin(); pt != mt->second.light.pulses.end(); pt++) {
-        if (a==1)
-          bundle[tserial][lserial][t][pt->sensor][a].push_back(-pt->angle);
-        else
-          bundle[tserial][lserial][t][pt->sensor][a].push_back(pt->angle);
-      }
+      for (pt = mt->second.light.pulses.begin(); pt != mt->second.light.pulses.end(); pt++)
+        bundle[tserial][lserial][t][pt->sensor][a].push_back(pt->angle);
     }
     ROS_INFO("Bundling corrections into larger discrete time units.");
     CorrectionMap::iterator ct;

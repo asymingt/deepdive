@@ -116,15 +116,12 @@ void LightCallback(struct Tracker * tracker,
   msg.header.stamp = ros::Time::now();
   msg.lighthouse = lighthouse->serial;
   // Make sure we convert to RHS
-  double scale = 1.0;
   switch (axis) {
-  case MOTOR_CW_ABOUT_LH_X:
-    msg.axis = deepdive_ros::Motor::AXIS_CCW_ABOUT_LH_X;
-    scale = -1.0;
+  case MOTOR_AXIS0:
+    msg.axis = deepdive_ros::Motor::AXIS_0;
     break;
-  case MOTOR_CCW_ABOUT_LH_Y:
-    msg.axis = deepdive_ros::Motor::AXIS_CCW_ABOUT_LH_Y;
-    scale = 1.0;
+  case MOTOR_AXIS1:
+    msg.axis = deepdive_ros::Motor::AXIS_1;
     break;
   default:
     ROS_WARN("Received light with invalid axis");

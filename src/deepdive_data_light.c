@@ -295,7 +295,7 @@ void handle_measurements(struct Tracker * tracker) {
   ax = lcd->per_sweep.activeAcode & 1;
 
   // Get the rotation based on the axis and negate Y to 
-  uint8_t motor = (ax == 0 ? MOTOR_CCW_ABOUT_LH_Y : MOTOR_CW_ABOUT_LH_X);
+  uint8_t motor = (ax == 0 ? MOTOR_AXIS0 : MOTOR_AXIS1);
 
   // Copy over the final data
   num_sensors = 0;
