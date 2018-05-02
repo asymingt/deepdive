@@ -37,6 +37,7 @@
 TrackerMap trackers_;
 LighthouseMap lighthouses_;
 MeasurementMap measurements_;
+CorrectionMap corrections_;
 
 // Global strings
 std::string calfile_ = "deepdive.tf2";
@@ -63,12 +64,13 @@ bool visualize_ = true;
 bool recording_ = false;
 
 // Graph resolution
-double res_;
+double res_ = 0.1;
 
 // World -> vive registatration
 double registration_[6];
 
 // Sensor visualization publisher
+ros::Publisher pub_truth_;
 std::map<std::string, ros::Publisher> pub_sensors_;
 std::map<std::string, std::map<std::string, ros::Publisher>> pub_path_;
 
@@ -90,7 +92,18 @@ bool Solve() {
       << measurements_.rbegin()->first);
   }
 
-  // Data storage for next step
+  // Check corrections
+  if (corrections_.empty()) {
+    ROS_INFO("No corrections in dataset. Assuming first body pose at origin.");
+  } else {
+    double t = (corrections_.rbegin()->first - corrections_.begin()->first).toSec();
+    ROS_INFO_STREAM("Processing " << corrections_.size()
+      << " corrections running for " << t << " seconds from "
+      << corrections_.begin()->first << " to "
+      << corrections_.rbegin()->first);
+  }
+
+  // Data storage for the upcoming steps
 
   typedef std::map<ros::Time,             // Time
             std::map<uint8_t,             // Sensor
@@ -99,11 +112,15 @@ bool Solve() {
               >
             >
           > Bundle;
-  std::map<std::string,               // Tracker
-    std::map<std::string,             // Lighthouse
+  std::map<std::string,                   // Tracker
+    std::map<std::string,                 // Lighthouse
       Bundle
     >
   > bundle;
+
+  std::map<ros::Time, double[6]> cor;     // Corrections
+
+  double height = 0.0;                    // Average height
 
   // We bundle measurements into into bins of width "resolution". This allows
   // us to take the average of the measurements to improve accuracy
@@ -119,17 +136,41 @@ bool Solve() {
       for (pt = mt->second.light.pulses.begin(); pt != mt->second.light.pulses.end(); pt++)
         bundle[tserial][lserial][t][pt->sensor][a].push_back(pt->angle);
     }
+    ROS_INFO("Bundling corrections into larger discrete time units.");
+    CorrectionMap::iterator ct;
+    for (ct = corrections_.begin(); ct != corrections_.end(); ct++) {
+      ros::Time t = ros::Time(round(ct->first.toSec() / res_) * res_);
+      Eigen::Quaterniond q(
+        ct->second.transform.rotation.w,
+        ct->second.transform.rotation.x,
+        ct->second.transform.rotation.y,
+        ct->second.transform.rotation.z);
+      Eigen::AngleAxisd aa(q.toRotationMatrix());
+      cor[t][0] = ct->second.transform.translation.x;
+      cor[t][1] = ct->second.transform.translation.y;
+      cor[t][2] = ct->second.transform.translation.z;
+      cor[t][3] = aa.angle() * aa.axis()[0];
+      cor[t][4] = aa.angle() * aa.axis()[1];
+      cor[t][5] = aa.angle() * aa.axis()[2];
+      height += ct->second.transform.translation.z;
+    }
+    if (!corrections_.empty())
+      height /= corrections_.size();
+    ROS_INFO_STREAM("Average height is " << height << " meters");
   }
+
 
   // Data storage for next step
 
-  std::map<std::string,               // Tracker
+  typedef std::map<std::string,               // Tracker
     std::map<ros::Time,               // Time
       std::map<std::string,           // Lighthouse
         double[6]                     // Transform
       >
     >
-  > poses;
+  > PoseMap;
+
+  PoseMap poses;
 
   // We are going to estimate the pose of each slave lighthouse in the frame
   // of the master lighthouse (vive frame) using PNP. We can think of the
@@ -231,12 +272,13 @@ bool Solve() {
     LighthouseMap::iterator lt;                         //
     for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
       // Master lighthouse
-      for (size_t i = 0; i < 6; i++) {
-        lt->second.vTl[0] = 0;
+      if (lt == lighthouses_.begin()) {
+        for (size_t i = 0; i < 6; i++)
+          lt->second.vTl[0] = 0;
         continue;
       }
       // Correspondences
-      std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> corr;
+      std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> corresp;
       // Slave lighthouse
       if (lt != lighthouses_.begin()) {
         TrackerMap::iterator tt;
@@ -247,7 +289,7 @@ bool Solve() {
             if (pt->second.find(lt->first) == pt->second.end() ||
                 pt->second.find(lm->first) == pt->second.end()) continue;
             // If we get here, then we have a correspondence
-            corr.push_back(std::pair<Eigen::Vector3d, Eigen::Vector3d>(
+            corresp.push_back(std::pair<Eigen::Vector3d, Eigen::Vector3d>(
               Eigen::Vector3d(
                 pt->second[lt->first][0],
                 pt->second[lt->first][1],
@@ -263,13 +305,14 @@ bool Solve() {
         }
       }
       // Run kabsch to determine the projection from the slave to master
-      Eigen::Matrix<double, 3, Eigen::Dynamic> pti(3, corr.size());
-      Eigen::Matrix<double, 3, Eigen::Dynamic> ptj(3, corr.size());
-      for (size_t i = 0; i < corr.size(); i++) {
-        pti.block<3, 1>(0, i) = corr[i].first;
-        ptj.block<3, 1>(0, i) = corr[i].second;
+      Eigen::Matrix<double, 3, Eigen::Dynamic> pti(3, corresp.size());
+      Eigen::Matrix<double, 3, Eigen::Dynamic> ptj(3, corresp.size());
+      for (size_t i = 0; i < corresp.size(); i++) {
+        pti.block<3, 1>(0, i) = corresp[i].first;
+        ptj.block<3, 1>(0, i) = corresp[i].second;
       }
       // Perform a KABSCH transform on the two matrices
+      ROS_INFO_STREAM("- Using " << corresp.size() << " correspondences");
       Eigen::Affine3d A;
       if (Kabsch<double>(pti, ptj, A, false))
         ROS_INFO_STREAM("- Solution " << A.translation().norm());
@@ -285,70 +328,148 @@ bool Solve() {
       lt->second.vTl[5] =  aa.angle() * aa.axis()[2];
     }
   }
+
+  // REGISTRATION - for the granite lab we know that the trackers are mounted
+  // symmetrically about the body frame. Consequently, the average X-Y pose
+  // of the trackers is a good approximation of the body X-Y pose. The height
+  // is fixed, so we can take the average from the corrections 
+  {
+    ROS_INFO("Using corrections to register vive to world frame.");
+    // The vive frame is the same as the maste rlighthouse
+    std::string lm = lighthouses_.begin()->first;
+    // This will store the correspondences
+    std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> corresp;
+    // Iterate over all corrections
+    std::map<ros::Time, double[6]>::iterator ct;
+    for (ct = cor.begin(); ct != cor.end(); ct++) {
+      double x = 0.0, y = 0.0, z = 0.0;
+      size_t n = 0;
+      TrackerMap::iterator tt;
+      for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+        if (poses.find(tt->first) != poses.end() &&
+          poses[tt->first].find(ct->first) != poses[tt->first].end() &&
+          poses[tt->first][ct->first].find(lm) != poses[tt->first][ct->first].end()) {
+          x += poses[tt->first][ct->first][lm][0];
+          y += poses[tt->first][ct->first][lm][1];
+          z += poses[tt->first][ct->first][lm][2];
+          n++;
+        }
+      }
+      // Only if we have data from all trackers
+      if (n == trackers_.size()) {
+        corresp.push_back(
+          std::pair<Eigen::Vector3d, Eigen::Vector3d>(
+            Eigen::Vector3d(x / n, y / n, z / n),
+            Eigen::Vector3d(ct->second[0], ct->second[1], ct->second[2])
+          )
+        );
+      }
+    }
+    // Run kabsch to determine the projection from the slave to master
+    Eigen::Matrix<double, 3, Eigen::Dynamic> pti(3, corresp.size());
+    Eigen::Matrix<double, 3, Eigen::Dynamic> ptj(3, corresp.size());
+    for (size_t i = 0; i < corresp.size(); i++) {
+      pti.block<3, 1>(0, i) = corresp[i].first;
+      ptj.block<3, 1>(0, i) = corresp[i].second;
+    }
+    // Perform a KABSCH transform on the two matrices
+    ROS_INFO_STREAM("- Using " << corresp.size() << " correspondences");
+    Eigen::Affine3d A;
+    if (Kabsch<double>(pti, ptj, A, false))
+      ROS_INFO_STREAM("- Solution " << A.translation().norm());
+    else
+      ROS_INFO("- Solution not found");
+    // Write the solution
+    registration_[0] = A.translation()[0];
+    registration_[1] = A.translation()[1];
+    registration_[2] = A.translation()[2];
+    Eigen::AngleAxisd aa(A.linear());
+    registration_[3] = aa.angle() * aa.axis()[0];
+    registration_[4] = aa.angle() * aa.axis()[1];
+    registration_[5] = aa.angle() * aa.axis()[2];
+  }
+
   // We now have a great estimate of the slave -> master lighthous transforms,
   // sensor trajectories, and global registration
   {
     SendTransforms(frame_world_, frame_vive_, frame_body_,
       registration_, lighthouses_, trackers_);
-    /*
     // Write the solution to a config file
     if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
       registration_, lighthouses_, trackers_))
       ROS_INFO_STREAM("Calibration written to " << calfile_);
     else
       ROS_INFO_STREAM("Could not write calibration to" << calfile_);
-    */
     // Print the trajectory of the body-frame in the world-frame
     if (visualize_) {
+      // Estimates
       LighthouseMap::iterator lt;
       for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
-        // Get the lighthouse -> vive transform
-        Eigen::Vector3d v(
-          lt->second.vTl[3], lt->second.vTl[4], lt->second.vTl[5]);
-        Eigen::AngleAxisd aa;
-        if (v.norm() > 0) {
-          aa.angle() = v.norm();
-          aa.axis() = v.normalized();
-        }
-        Eigen::Affine3d vTl = Eigen::Affine3d::Identity();
-        vTl.translation()[0] = lt->second.vTl[0];
-        vTl.translation()[1] = lt->second.vTl[1];
-        vTl.translation()[2] = lt->second.vTl[2];
-        vTl.linear() = aa.toRotationMatrix();
-        // Now project the trajectory
         TrackerMap::iterator tt;
         for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
-          // Path
+          // Create a path
           nav_msgs::Path msg;
           msg.header.stamp = ros::Time::now();
-          msg.header.frame_id = "world";
+          msg.header.frame_id = lt->first;
           // Iterate over timestamp
           std::map<ros::Time, std::map<std::string, double[6]>>::iterator pt;
           for (pt = poses[tt->first].begin(); pt != poses[tt->first].end(); pt++) {
-            // We must have a pose for both the master AND the slave
+            // Don't plot if the data doesn't exist
             if (pt->second.find(lt->first) == pt->second.end())
               continue;
+            // Convert axis angle to quaternion
             Eigen::Vector3d v(
-              pt->second[lt->first][0],
-              pt->second[lt->first][1],
-              pt->second[lt->first][2]);
-            v = vTl * v;
+              pt->second[lt->first][3],
+              pt->second[lt->first][4],
+              pt->second[lt->first][5]);
+            Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
+            if (v.norm() > 0) {
+              aa.angle() = v.norm();
+              aa.axis() = v.normalized();
+            }
+            Eigen::Quaterniond q(aa);
             // PUblish pose
             geometry_msgs::PoseStamped ps;
             ps.header.stamp = pt->first;
-            ps.header.frame_id = frame_vive_;
-            ps.pose.position.x = v[0];
-            ps.pose.position.y = v[1];
-            ps.pose.position.z = v[2];
-            ps.pose.orientation.w = 1.0;
-            ps.pose.orientation.x = 0.0;
-            ps.pose.orientation.y = 0.0;
-            ps.pose.orientation.z = 0.0;
+            ps.header.frame_id = lt->first;
+            ps.pose.position.x = pt->second[lt->first][0];
+            ps.pose.position.y = pt->second[lt->first][1];
+            ps.pose.position.z = pt->second[lt->first][2];
+            ps.pose.orientation.w = q.w();
+            ps.pose.orientation.x = q.x();
+            ps.pose.orientation.y = q.y();
+            ps.pose.orientation.z = q.z();
             msg.poses.push_back(ps);
           }
           pub_path_[lt->first][tt->first].publish(msg);
         }
       }
+      // Create a path
+      nav_msgs::Path msg;
+      msg.header.stamp = ros::Time::now();
+      msg.header.frame_id = frame_world_;
+      std::map<ros::Time, double[6]>::iterator ct;
+      for (ct = cor.begin(); ct != cor.end(); ct++) {
+        Eigen::Vector3d v(ct->second[3], ct->second[4], ct->second[5]);
+        Eigen::AngleAxisd aa = Eigen::AngleAxisd::Identity();
+        if (v.norm() > 0) {
+          aa.angle() = v.norm();
+          aa.axis() = v.normalized();
+        }
+        Eigen::Quaterniond q(aa);
+        geometry_msgs::PoseStamped ps;
+        ps.header.stamp = ct->first;
+        ps.header.frame_id = frame_world_;
+        ps.pose.position.x = ct->second[0];
+        ps.pose.position.y = ct->second[1];
+        ps.pose.position.z = ct->second[2];
+        ps.pose.orientation.w = q.w();
+        ps.pose.orientation.x = q.x();
+        ps.pose.orientation.y = q.y();
+        ps.pose.orientation.z = q.z();
+        msg.poses.push_back(ps);
+      }
+      pub_truth_.publish(msg);
     }
   }
   return true;
@@ -405,6 +526,20 @@ bool TriggerCallback(std_srvs::Trigger::Request  &req,
   recording_ = !recording_;
   // Success
   return true;
+}
+
+// When corrections arrive
+void CorrectionCallback(tf2_msgs::TFMessage::ConstPtr const& msg) {
+  // Check that we are recording and that the tracker/lighthouse is ready
+  if (!recording_)
+    return;
+  std::vector<geometry_msgs::TransformStamped>::const_iterator it;
+  for (it = msg->transforms.begin(); it != msg->transforms.end(); it++) {
+    if (it->header.frame_id == frame_world_ &&
+        it->child_frame_id == frame_body_) {
+      corrections_[ros::Time::now()] = *it;
+    }
+  }
 }
 
 // Fake a trigger when the timer expires
@@ -579,6 +714,7 @@ int main(int argc, char **argv) {
     trackers_[serial].bTh[5] = aa.angle() * aa.axis()[2];
     trackers_[serial].ready = false;
     // Publish sensor location and body trajectory 
+    pub_truth_ = nh.advertise<nav_msgs::Path>("/truth", 10, true);
     pub_sensors_[serial] = nh.advertise<visualization_msgs::MarkerArray>(
       "/sensors/" + *jt, 10, true);
     LighthouseMap::iterator lt;
@@ -612,6 +748,8 @@ int main(int argc, char **argv) {
         NewLighthouseCallback));
   ros::Subscriber sub_light =
     nh.subscribe("/light", 1000, LightCallback);
+  ros::Subscriber sub_corrections =
+    nh.subscribe("/tf", 1000, CorrectionCallback);
   ros::ServiceServer service =
     nh.advertiseService("/trigger", TriggerCallback);
 
