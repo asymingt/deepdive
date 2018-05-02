@@ -53,19 +53,21 @@ trackers:
   - "tracker_port"
   - "tracker_stbd"
 tracker_port:
-  serial:          "LHR-08DE340B"
-  extrinsics:      [0.000, -0.1425, -0.162,  0.7071,  0.0000,  0.0000,  0.7071]
+  serial:          "LHR-08DE340B"  # THis needs to rotate
+  extrinsics:      [0.000, -0.1625, -0.202, -1.0, 0.0, 0.0, 0.0]
 tracker_stbd:
   serial:          "LHR-08DDBC05"
-  extrinsics:      [0.000,  0.1425, -0.162, -0.7071,  0.0000,  0.0000,  0.7071]
+  extrinsics:      [0.000,  0.1625, -0.202, 0.0, 1.0, 0.0, 0.0]
 
 # Registration and calibration bundle resolution
 resolution:         0.2
 
-# REGISTRATION OPTIONS
+# CCALIBRATION OPTIONS
 
-# Force z, roll and pitch to be constant when solving. The corrections will be
-# used to find the fixed height. If there are no corrections, it will be zero.
+# Assume that the motion of the body is static throughout the experiment
+static:             false
+
+# If dynamic, force z, roll and pitch to be constant when solving.
 force2d:            true
 
 # Smoothing factor
@@ -73,7 +75,6 @@ smoothing:          1.0
 
 # What else to refine, besides the trajectory
 refine:
-  registration:     true       # World - > vive
   lighthouses:      true       # Refine lighthouse positions
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions

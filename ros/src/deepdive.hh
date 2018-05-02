@@ -157,5 +157,76 @@ class Statistics {
 // Get the average of a vector of doubles
 bool Mean(std::vector<double> const& v, double & d);
 
+// TRACKING ROUTINES
+
+// This algorithm solves the Procrustes problem in that it finds an affine transform
+// (rotation, translation, scale) that maps the "in" matrix to the "out" matrix
+// Code from: https://github.com/oleg-alexandrov/projects/blob/master/eigen/Kabsch.cpp
+// License is that this code is release in the public domain... Thanks, Oleg :)
+template <typename T>
+static bool Kabsch(
+  Eigen::Matrix<T, 3, Eigen::Dynamic> in,
+  Eigen::Matrix<T, 3, Eigen::Dynamic> out,
+  Eigen::Transform<T, 3, Eigen::Affine> &A, bool allowScale) {
+  // Default output
+  A.linear() = Eigen::Matrix<T, 3, 3>::Identity(3, 3);
+  A.translation() = Eigen::Matrix<T, 3, 1>::Zero();
+  // A simple check to see that we have a sufficient number of correspondences
+  if (in.cols() < 4) {
+    // ROS_WARN("Visualeyez needs to see at least four LEDs to track");
+    return false;
+  }
+  // A simple check to see that we have a sufficient number of correspondences
+  if (in.cols() != out.cols()) {
+    // ROS_ERROR("Same number of points required in input matrices");
+    return false;
+  }
+  // First find the scale, by finding the ratio of sums of some distances,
+  // then bring the datasets to the same scale.
+  T dist_in = T(0.0), dist_out = T(0.0);
+  for (int col = 0; col < in.cols()-1; col++) {
+    dist_in  += (in.col(col+1) - in.col(col)).norm();
+    dist_out += (out.col(col+1) - out.col(col)).norm();
+  }
+  if (dist_in <= T(0.0) || dist_out <= T(0.0))
+    return true;
+  T scale = T(1.0);
+  if (allowScale) {
+    scale = dist_out/dist_in;
+    out /= scale;
+  }
+  // Find the centroids then shift to the origin
+  Eigen::Matrix<T, 3, 1> in_ctr = Eigen::Matrix<T, 3, 1>::Zero();
+  Eigen::Matrix<T, 3, 1> out_ctr = Eigen::Matrix<T, 3, 1>::Zero();
+  for (int col = 0; col < in.cols(); col++) {
+    in_ctr  += in.col(col);
+    out_ctr += out.col(col);
+  }
+  in_ctr /= T(in.cols());
+  out_ctr /= T(out.cols());
+  for (int col = 0; col < in.cols(); col++) {
+    in.col(col)  -= in_ctr;
+    out.col(col) -= out_ctr;
+  }
+  // SVD
+  Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> Cov = in * out.transpose();
+  Eigen::JacobiSVD < Eigen::Matrix < T, Eigen::Dynamic, Eigen::Dynamic > > svd(Cov,
+    Eigen::ComputeThinU | Eigen::ComputeThinV);
+  // Find the rotation
+  T d = (svd.matrixV() * svd.matrixU().transpose()).determinant();
+  if (d > T(0.0))
+    d = T(1.0);
+  else
+    d = T(-1.0);
+  Eigen::Matrix<T, 3, 3> I = Eigen::Matrix<T, 3, 3>::Identity(3, 3);
+  I(2, 2) = d;
+  Eigen::Matrix<T, 3, 3> R = svd.matrixV() * I * svd.matrixU().transpose();
+  // The final transform
+  A.linear() = scale * R;
+  A.translation() = scale*(out_ctr - R*in_ctr);
+  // Success
+  return true;
+}
+
 #endif
 

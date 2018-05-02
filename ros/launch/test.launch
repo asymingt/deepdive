@@ -5,10 +5,11 @@
   <arg name="rviz" default="true" />
   <arg name="offline" default="false" />
   <arg name="speed" default="1" />
+  <arg name="bag" default="$(arg profile)" />
   <!-- Derived -->
   <arg name="f_rviz" default="$(find deepdive_ros)/rviz/$(arg profile).rviz"/>
   <arg name="f_conf" default="$(find deepdive_ros)/conf/$(arg profile).yaml"/>
-  <arg name="f_data" default="$(find deepdive_ros)/data/$(arg profile).bag"/>
+  <arg name="f_data" default="$(find deepdive_ros)/data/$(arg bag).bag"/>
   <arg name="f_cal" default="$(find deepdive_ros)/cal/$(arg profile).tf2"/>
   <!-- Bridge or replay, depending on the offline argument -->
   <param if="$(arg offline)" name="/use_sim_time" type="bool" value="true"/>
@@ -20,8 +21,8 @@
         pkg="deepdive_ros" type="deepdive_bridge"
         name="$(arg profile)_bridge" output="$(arg output)"/>
   <!-- Calibration (if offline then solution starts immediately) -->
-  <node pkg="deepdive_ros" type="deepdive_registration"
-        name="$(arg profile)_registration" output="$(arg output)">
+  <node pkg="deepdive_ros" type="deepdive_test"
+        name="$(arg profile)_test" output="$(arg output)">
     <rosparam command="load" file="$(arg f_conf)" />
     <param name="offline" type="bool" value="$(arg offline)" />
     <param name="calfile" type="string" value="$(arg f_cal)" />
