@@ -73,15 +73,15 @@ offset:             [0.0, 0.0, -0.200]
 force2d:            true
 
 # Smoothing factor
-smoothing:          5.0
+smoothing:          0.0
 
 # What else to refine, besides the trajectory
 refine:
   registration:     false      # Refine vive -> world transform
   lighthouses:      false      # Refine lighthouse -> vive transform
-  extrinsics:       true       # If false tracker frame is the body frame
+  extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
-  params:           false      # Refine lighthouse parameters
+  params:           true       # Refine lighthouse parameters
   head:             false      # Refine head transform
 
 # These are the parameters used by the non-linear least squares optimizer

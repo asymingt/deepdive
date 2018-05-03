@@ -445,11 +445,29 @@ bool Solve() {
     if (!refine_registration_)
       problem.SetParameterBlockConstant(wTv_);
 
+
+
     // If we have a fixed the height use the mean height estimate
     if (force2d_) {
       std::map<ros::Time, double[6]>::iterator it;
       for (it = wTb.begin(); it != wTb.end(); it++)
         it->second[2] = height.Mean();
+    }
+
+    // Parameters before solving
+    {
+      LighthouseMap::iterator lt;
+      for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+        ROS_INFO_STREAM("Parameters BEFORE solving: " << lt->first);
+        for (uint8_t a = 0; a < 2; a++) {
+          ROS_INFO_STREAM("AXIS " << a);
+          ROS_INFO_STREAM("- phase: " << lt->second.params[a*NUM_PARAMS + PARAM_PHASE]);
+          ROS_INFO_STREAM("- tilt: " << lt->second.params[a*NUM_PARAMS + PARAM_TILT]);
+          ROS_INFO_STREAM("- gib phase: " << lt->second.params[a*NUM_PARAMS + PARAM_GIB_PHASE]);
+          ROS_INFO_STREAM("- git mag: " << lt->second.params[a*NUM_PARAMS + PARAM_GIB_MAG]);
+          ROS_INFO_STREAM("- curve: " << lt->second.params[a*NUM_PARAMS + PARAM_CURVE]);
+        }
+      }
     }
 
     // Now solve the problem
@@ -541,6 +559,24 @@ bool Solve() {
       return false;
     }
   }
+
+  // Parameters before solving
+  {
+    LighthouseMap::iterator lt;
+    for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+      ROS_INFO_STREAM("Parameters AFTER solving: " << lt->first);
+      for (uint8_t a = 0; a < 2; a++) {
+        ROS_INFO_STREAM("AXIS " << a);
+        ROS_INFO_STREAM("- phase: " << lt->second.params[a*NUM_PARAMS + PARAM_PHASE]);
+        ROS_INFO_STREAM("- tilt: " << lt->second.params[a*NUM_PARAMS + PARAM_TILT]);
+        ROS_INFO_STREAM("- gib phase: " << lt->second.params[a*NUM_PARAMS + PARAM_GIB_PHASE]);
+        ROS_INFO_STREAM("- git mag: " << lt->second.params[a*NUM_PARAMS + PARAM_GIB_MAG]);
+        ROS_INFO_STREAM("- curve: " << lt->second.params[a*NUM_PARAMS + PARAM_CURVE]);
+      }
+    }
+  }
+
+
   return true;
 }
 
