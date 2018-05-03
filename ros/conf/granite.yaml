@@ -77,9 +77,10 @@ smoothing:          0.0
 
 # What else to refine, besides the trajectory
 refine:
+  trajectory:       false      # If false, corrections will be used (cheating)
   registration:     false      # Refine vive -> world transform
   lighthouses:      false      # Refine lighthouse -> vive transform
-  extrinsics:       false      # If false tracker frame is the body frame
+  extrinsics:       true       # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           true       # Refine lighthouse parameters
   head:             false      # Refine head transform

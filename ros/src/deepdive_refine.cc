@@ -66,6 +66,7 @@ double thresh_duration_ = 1.0;
 ceres::Solver::Options options_;
 
 // What to solve for
+bool refine_trajectory_ = true;
 bool refine_registration_ = true;
 bool refine_lighthouses_ = false;
 bool refine_extrinsics_ = false;
@@ -345,15 +346,28 @@ bool Solve() {
           // In the case that we have 4 or more measurements, then we can try
           // and estimate the trackers location in the lighthouse frame.
           if (obj.size() > 3) {
-            cv::Mat cam = cv::Mat::eye(3, 3, cv::DataType<double>::type);
-            cv::Mat dist;
-            cam.at<double>(0, 0) = z;
-            cam.at<double>(1, 1) = z;
-            cv::Mat R(3, 1, cv::DataType<double>::type);
-            cv::Mat T(3, 1, cv::DataType<double>::type);
-            cv::Mat C(3, 3, cv::DataType<double>::type);
-            if (cv::solvePnPRansac(obj, img, cam, dist, R, T,  false,
-              100, 8.0, 0.99, cv::noArray(), cv::SOLVEPNP_UPNP)) {
+            // If we do't want to refine the trajectory, just use the corrections
+            // as estimates of the sensor trajectory. This is mainly to help
+            // solve for extrinsics and lighthouse prameters.
+            if (!refine_trajectory_) {
+              std::map<ros::Time, double[6]>::iterator ct = corr.find(bt->first);
+              if (ct == corr.end())
+                continue;
+              for (size_t i = 0; i < 6; i++)
+                wTb[bt->first][i] = ct->second[i];
+            // If we are solving for trajectory, get a nice initial estimate
+            // using PNP. Otherwise, the majority of the solvers effort goes
+            // into moving each pose in the trajectory.
+            } else {
+              cv::Mat cam = cv::Mat::eye(3, 3, cv::DataType<double>::type);
+              cv::Mat dist;
+              cam.at<double>(0, 0) = z;
+              cam.at<double>(1, 1) = z;
+              cv::Mat R(3, 1, cv::DataType<double>::type);
+              cv::Mat T(3, 1, cv::DataType<double>::type);
+              cv::Mat C(3, 3, cv::DataType<double>::type);
+              if (!cv::solvePnPRansac(obj, img, cam, dist, R, T,  false,
+                100, 8.0, 0.99, cv::noArray(), cv::SOLVEPNP_UPNP)) continue;
               cv::Rodrigues(R, C);
               Eigen::Matrix3d rot;
               for (size_t r = 0; r < 3; r++)
@@ -380,49 +394,58 @@ bool Solve() {
               wTb[bt->first][3] = aa.angle() * aa.axis()[0];
               wTb[bt->first][4] = aa.angle() * aa.axis()[1];
               wTb[bt->first][5] = aa.angle() * aa.axis()[2];
-              // Recursive calculation of mean
-              height.Feed(wTb[bt->first][2]);
-              // Add the cost function
-              ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<GroupCost,
-                ceres::DYNAMIC, 6, 6, 2, 1, 2, 1, 6, 6, NUM_SENSORS * 6,
-                  NUM_PARAMS * 2>(new GroupCost(group), group.size());
-              // Add the residual block
-              problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-                reinterpret_cast<double*>(wTv_),
-                reinterpret_cast<double*>(lt->second.vTl),
-                reinterpret_cast<double*>(&wTb[bt->first][0]),
-                reinterpret_cast<double*>(&wTb[bt->first][2]),
-                reinterpret_cast<double*>(&wTb[bt->first][3]),
-                reinterpret_cast<double*>(&wTb[bt->first][5]),
-                reinterpret_cast<double*>(tt->second.bTh),
-                reinterpret_cast<double*>(tt->second.tTh),
-                reinterpret_cast<double*>(tt->second.sensors),
-                reinterpret_cast<double*>(lt->second.params));
-              if (force2d_) {
-                wTb[bt->first][3] = 0.0;    // Pitch
-                wTb[bt->first][4] = 0.0;    // Roll
-                problem.SetParameterBlockConstant(&wTb[bt->first][2]);
-                problem.SetParameterBlockConstant(&wTb[bt->first][3]);
-              }
-              // If we have a previous node, then link with a motion cost
-              if (smoothing_ > 0) {
-                std::map<ros::Time, double[6]>::iterator c = wTb.find(bt->first);
-                std::map<ros::Time, double[6]>::iterator p = std::prev(c);
-                if (c != wTb.end() && p != c) {
-                  // Create a cost function to represent motion
-                  ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-                        <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
-                  // Add a residual block for error
-                  problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-                    reinterpret_cast<double*>(&p->second[0]),  // pos: xy
-                    reinterpret_cast<double*>(&p->second[2]),  // pos: z
-                    reinterpret_cast<double*>(&p->second[3]),  // rot: xy
-                    reinterpret_cast<double*>(&p->second[5]),  // rot: z
-                    reinterpret_cast<double*>(&c->second[0]),  // pos: xy
-                    reinterpret_cast<double*>(&c->second[2]),  // pos: z
-                    reinterpret_cast<double*>(&c->second[3]),  // rot: xy
-                    reinterpret_cast<double*>(&c->second[5])); // rot: z
-                }
+            }
+            // Recursive calculation of mean
+            height.Feed(wTb[bt->first][2]);
+            // Add the cost function
+            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<GroupCost,
+              ceres::DYNAMIC, 6, 6, 2, 1, 2, 1, 6, 6, NUM_SENSORS * 6,
+                NUM_PARAMS * 2>(new GroupCost(group), group.size());
+            // Add the residual block
+            problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+              reinterpret_cast<double*>(wTv_),
+              reinterpret_cast<double*>(lt->second.vTl),
+              reinterpret_cast<double*>(&wTb[bt->first][0]),
+              reinterpret_cast<double*>(&wTb[bt->first][2]),
+              reinterpret_cast<double*>(&wTb[bt->first][3]),
+              reinterpret_cast<double*>(&wTb[bt->first][5]),
+              reinterpret_cast<double*>(tt->second.bTh),
+              reinterpret_cast<double*>(tt->second.tTh),
+              reinterpret_cast<double*>(tt->second.sensors),
+              reinterpret_cast<double*>(lt->second.params));
+            // If we do not want the trajectory refined then mark all parts of
+            // the trajectory as constant blocks
+            if (!refine_trajectory_) {
+              problem.SetParameterBlockConstant(&wTb[bt->first][0]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][2]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][3]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][5]);
+            } 
+            // If we are forcing 3D, then set the pitch and roll
+            if (force2d_) {
+              wTb[bt->first][3] = 0.0;    // Pitch
+              wTb[bt->first][4] = 0.0;    // Roll
+              problem.SetParameterBlockConstant(&wTb[bt->first][2]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][3]);
+            }
+            // If we have a previous node, then link with a motion cost
+            if (smoothing_ > 0) {
+              std::map<ros::Time, double[6]>::iterator c = wTb.find(bt->first);
+              std::map<ros::Time, double[6]>::iterator p = std::prev(c);
+              if (c != wTb.end() && p != c) {
+                // Create a cost function to represent motion
+                ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+                      <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
+                // Add a residual block for error
+                problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+                  reinterpret_cast<double*>(&p->second[0]),  // pos: xy
+                  reinterpret_cast<double*>(&p->second[2]),  // pos: z
+                  reinterpret_cast<double*>(&p->second[3]),  // rot: xy
+                  reinterpret_cast<double*>(&p->second[5]),  // rot: z
+                  reinterpret_cast<double*>(&c->second[0]),  // pos: xy
+                  reinterpret_cast<double*>(&c->second[2]),  // pos: z
+                  reinterpret_cast<double*>(&c->second[3]),  // rot: xy
+                  reinterpret_cast<double*>(&c->second[5])); // rot: z
               }
             }
             count++;
@@ -773,6 +796,8 @@ int main(int argc, char **argv) {
   // What to refine
   if (!nh.getParam("refine/registration", refine_registration_))
     ROS_FATAL("Failed to get refine/registration parameter.");
+  if (!nh.getParam("refine/trajectory", refine_trajectory_))
+    ROS_FATAL("Failed to get refine/trajectory parameter.");
   if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
     ROS_FATAL("Failed to get refine/lighthouses parameter.");
   if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
