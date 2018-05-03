@@ -94,6 +94,7 @@ double smoothing_ = 10.0;
 // Sensor visualization publisher
 ros::Publisher pub_sensors_;
 ros::Publisher pub_path_;
+ros::Publisher pub_ekf_;
 
 // Timer for managing offline
 ros::Timer timer_;
@@ -486,7 +487,52 @@ bool Solve() {
         pub_path_.publish(msg);
       }
       ROS_INFO("- Writing performance to file");
-      std::ofstream (perfile_);
+      std::ofstream outfile(perfile_);
+      if (outfile.is_open()) {
+        nav_msgs::Path msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = frame_world_;
+        std::map<ros::Time, double[6]>::iterator it, ct;
+        for (it = wTb.begin(); it != wTb.end(); it++) {
+          ct = corr.find(it->first);
+          if (ct == corr.end())
+            continue;
+          outfile << (it->first.toSec() - wTb.begin()->first.toSec()) << ","
+                  << it->second[0] << ","
+                  << it->second[1] << ","
+                  << it->second[2] << ","
+                  << it->second[3] << ","
+                  << it->second[4] << ","
+                  << it->second[5] << ","
+                  << ct->second[0] << ","
+                  << ct->second[1] << ","
+                  << ct->second[2] << ","
+                  << ct->second[3] << ","
+                  << ct->second[4] << ","
+                  << ct->second[5] << std::endl;
+          // Add the pose
+          geometry_msgs::PoseStamped ps;
+          Eigen::Vector3d v(ct->second[3], ct->second[4], ct->second[5]);
+          Eigen::AngleAxisd aa;
+          if (v.norm() > 0) {
+            aa.angle() = v.norm();
+            aa.axis() = v.normalized();
+          }
+          Eigen::Quaterniond q(aa);
+          ps.header.stamp = ct->first;
+          ps.header.frame_id = frame_world_;
+          ps.pose.position.x = ct->second[0];
+          ps.pose.position.y = ct->second[1];
+          ps.pose.position.z = ct->second[2];
+          ps.pose.orientation.w = q.w();
+          ps.pose.orientation.x = q.x();
+          ps.pose.orientation.y = q.y();
+          ps.pose.orientation.z = q.z();
+          msg.poses.push_back(ps);
+        }
+        outfile.close();
+        pub_ekf_.publish(msg);
+      }
       // Update transforms so we can see the solution iun rviz
       SendTransforms(frame_world_, frame_vive_, frame_body_,
         wTv_, lighthouses_, trackers_);
@@ -812,6 +858,8 @@ int main(int argc, char **argv) {
     nh.advertise<visualization_msgs::MarkerArray>("/sensors", 10, true);
   pub_path_ =
     nh.advertise<nav_msgs::Path>("/path", 10, true);
+  pub_ekf_ =
+    nh.advertise<nav_msgs::Path>("/truth", 10, true);
 
   // Setup a timer to automatically trigger solution on end of experiment
   timer_ = nh.createTimer(ros::Duration(1.0), TimerCallback, true, false);

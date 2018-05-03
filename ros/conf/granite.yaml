@@ -79,7 +79,7 @@ smoothing:          5.0
 refine:
   registration:     false      # Refine vive -> world transform
   lighthouses:      false      # Refine lighthouse -> vive transform
-  extrinsics:       false      # If false tracker frame is the body frame
+  extrinsics:       true       # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters
   head:             false      # Refine head transform
