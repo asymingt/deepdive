@@ -70,7 +70,7 @@ double res_ = 0.1;
 std::vector<double> offset_;
 
 // World -> vive registatration
-double registration_[6];
+double wTv_[6];
 
 // Sensor visualization publisher
 ros::Publisher pub_truth_;
@@ -162,7 +162,6 @@ bool Solve() {
     ROS_INFO_STREAM("Average height is " << height << " meters");
   }
 
-
   // Data storage for next step
 
   typedef std::map<std::string,               // Tracker
@@ -216,12 +215,10 @@ bool Solve() {
               trackers_[tt->first].sensors[s * 6 + 2]));
             // Push on the coordinate in the slave image plane
             img.push_back(cv::Point2f(z * tan(angles[0]), z * tan(angles[1])));
-            // ROS_INFO_STREAM("-- Sensor " << static_cast<int>(s) << " at " <<
-            //  (bt->first - bundle[tt->first][lt->first].begin()->first).toSec());
           }
           // In the case that we have 4 or more measurements, then we can try
           // and estimate the trackers location in the lighthouse frame.
-          if (obj.size() > 3) {
+          if (obj.size() > 6) {
             cv::Mat cam = cv::Mat::eye(3, 3, cv::DataType<double>::type);
             cv::Mat dist;
             cam.at<double>(0, 0) = z;
@@ -229,14 +226,9 @@ bool Solve() {
             cv::Mat R(3, 1, cv::DataType<double>::type);
             cv::Mat T(3, 1, cv::DataType<double>::type);
             cv::Mat C(3, 3, cv::DataType<double>::type);
-            if (cv::solvePnP(obj, img, cam, dist, R, T, false, cv::SOLVEPNP_EPNP)) {
+            if (cv::solvePnPRansac(obj, img, cam, dist, R, T,  false,
+              100, 8.0, 0.99, cv::noArray(), cv::SOLVEPNP_UPNP)) {
               cv::Rodrigues(R, C);
-              // double dist = std::sqrt(T.at<double>(0, 0) * T.at<double>(0, 0)
-              //  + T.at<double>(1, 0) * T.at<double>(1, 0)
-              //  + T.at<double>(2, 0) * T.at<double>(2, 0));
-              // ROS_INFO_STREAM("- DIF " << dist);
-              // ROS_INFO_STREAM("- TRA " << T);
-              // ROS_INFO_STREAM("- ROT " << C);
               Eigen::Matrix3d rot;
               for (size_t r = 0; r < 3; r++)
                 for (size_t c = 0; c < 3; c++)
@@ -378,23 +370,23 @@ bool Solve() {
     else
       ROS_INFO("- Solution not found");
     // Write the solution
-    registration_[0] = A.translation()[0];
-    registration_[1] = A.translation()[1];
-    registration_[2] = A.translation()[2];
+    wTv_[0] = A.translation()[0];
+    wTv_[1] = A.translation()[1];
+    wTv_[2] = A.translation()[2];
     Eigen::AngleAxisd aa(A.linear());
-    registration_[3] = aa.angle() * aa.axis()[0];
-    registration_[4] = aa.angle() * aa.axis()[1];
-    registration_[5] = aa.angle() * aa.axis()[2];
+    wTv_[3] = aa.angle() * aa.axis()[0];
+    wTv_[4] = aa.angle() * aa.axis()[1];
+    wTv_[5] = aa.angle() * aa.axis()[2];
   }
 
   // We now have a great estimate of the slave -> master lighthous transforms,
   // sensor trajectories, and global registration
   {
     SendTransforms(frame_world_, frame_vive_, frame_body_,
-      registration_, lighthouses_, trackers_);
+      wTv_, lighthouses_, trackers_);
     // Write the solution to a config file
     if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
-      registration_, lighthouses_, trackers_))
+      wTv_, lighthouses_, trackers_))
       ROS_INFO_STREAM("Calibration written to " << calfile_);
     else
       ROS_INFO_STREAM("Could not write calibration to" << calfile_);
@@ -623,7 +615,7 @@ int main(int argc, char **argv) {
 
   // Reset the registration information
   for (size_t i = 0; i < 6; i++)
-    registration_[i] = 0;
+    wTv_[i] = 0;
 
   // Get the parent information
   if (!nh.getParam("calfile", calfile_))
@@ -729,7 +721,7 @@ int main(int argc, char **argv) {
 
   // Send the transforms out
   SendTransforms(frame_world_, frame_vive_, frame_body_,
-    registration_, lighthouses_, trackers_);
+    wTv_, lighthouses_, trackers_);
 
   // Subscribe to tracker and lighthouse updates
   ros::Subscriber sub_tracker  = 

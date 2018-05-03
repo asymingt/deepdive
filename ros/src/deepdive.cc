@@ -98,6 +98,24 @@ void SendTransforms(
   }
 }
 
+// Convert a ceres to an Eigen transform
+Eigen::Affine3d CeresToEigen(double ceres[6], bool invert) {
+  Eigen::Affine3d A;
+  A.translation()[0] = ceres[0];
+  A.translation()[1] = ceres[1];
+  A.translation()[2] = ceres[2];
+  Eigen::Vector3d v(ceres[3], ceres[4], ceres[5]);
+  Eigen::AngleAxisd aa;
+  if (v.norm() > 0) {
+    aa.angle() = v.norm();
+    aa.axis() = v.normalized();
+  }
+  A.linear() = aa.toRotationMatrix();
+  if (invert)
+    return A.inverse();
+  return A;
+}
+
 // CONFIG MANAGEMENT
 
 // Parse a human-readable configuration

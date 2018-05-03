@@ -11,6 +11,7 @@
   <arg name="f_conf" default="$(find deepdive_ros)/conf/$(arg profile).yaml"/>
   <arg name="f_data" default="$(find deepdive_ros)/data/$(arg bag).bag"/>
   <arg name="f_cal" default="$(find deepdive_ros)/cal/$(arg profile).tf2"/>
+  <arg name="f_per" default="$(find deepdive_ros)/perf/$(arg profile).csv"/>
   <!-- Bridge or replay, depending on the offline argument -->
   <param if="$(arg offline)" name="/use_sim_time" type="bool" value="true"/>
   <node if="$(arg offline)"
@@ -26,6 +27,7 @@
     <rosparam command="load" file="$(arg f_conf)" />
     <param name="offline" type="bool" value="$(arg offline)" />
     <param name="calfile" type="string" value="$(arg f_cal)" />
+    <param name="perfile" type="string" value="$(arg f_per)" />
   </node>
   <!-- Visualization -->
   <group if="$(arg rviz)">

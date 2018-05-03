@@ -88,6 +88,8 @@ void SendTransforms(
   double registration[6],
   LighthouseMap const& lighthouses, TrackerMap const& trackers);
 
+// Convert a ceres to an Eigen transform
+Eigen::Affine3d CeresToEigen(double ceres[6], bool invert = false);
 
 // CONFIG MANAGEMENT
 
@@ -117,10 +119,10 @@ void TrackerCallback(deepdive_ros::Trackers::ConstPtr const& msg,
 
 // RUNTIME STATISTICS
 
-class Statistics {
+class Statistic {
  public:
   // Constructor and initialization
-  Statistics() : count_(0.0), mean_(0.0), var_(0.0) {};
+  Statistic() : count_(0.0), mean_(0.0), var_(0.0) {};
 
   // Feed a value and calculate recursive statistics
   void Feed(double value) {
