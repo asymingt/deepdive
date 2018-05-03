@@ -57,18 +57,18 @@ target_link_libraries(deepdive_bridge ${DEEPDIVE_LIBRARIES})
 cs_add_library(deepdive_core src/deepdive.cc)
 
 # Solver finds the world pose of every lighthouse
-cs_add_executable(deepdive_test src/deepdive_test.cc)
-target_link_libraries(deepdive_test deepdive_core ${OpenCV_LIBS})
+cs_add_executable(deepdive_calibrate src/deepdive_calibrate.cc)
+target_link_libraries(deepdive_calibrate deepdive_core ${OpenCV_LIBS})
 
 # Solver finds the world pose of every lighthouse
-cs_add_executable(deepdive_calibration src/deepdive_calibration.cc)
-target_link_libraries(deepdive_calibration deepdive_core ${CERES_LIBRARIES})
+cs_add_executable(deepdive_refine src/deepdive_refine.cc)
+target_link_libraries(deepdive_refine deepdive_core ${CERES_LIBRARIES})
 
 # Filter find the world pose of a soecific tracker
-cs_add_executable(deepdive_tracker src/deepdive_tracker.cc)
-target_compile_definitions(deepdive_tracker PRIVATE -DUKF_DOUBLE_PRECISION)
-target_link_libraries(deepdive_tracker deepdive_core)
-add_dependencies(deepdive_tracker ukf)
+cs_add_executable(deepdive_track src/deepdive_track.cc)
+target_compile_definitions(deepdive_track PRIVATE -DUKF_DOUBLE_PRECISION)
+target_link_libraries(deepdive_track deepdive_core)
+add_dependencies(deepdive_track ukf)
 
 # Install products
 cs_install()

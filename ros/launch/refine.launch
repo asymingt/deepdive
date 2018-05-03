@@ -21,8 +21,8 @@
         pkg="deepdive_ros" type="deepdive_bridge"
         name="$(arg profile)_bridge" output="$(arg output)"/>
   <!-- Calibration (if offline then solution starts immediately) -->
-  <node pkg="deepdive_ros" type="deepdive_test"
-        name="$(arg profile)_test" output="$(arg output)">
+  <node pkg="deepdive_ros" type="deepdive_refine"
+        name="$(arg profile)_refine" output="$(arg output)">
     <rosparam command="load" file="$(arg f_conf)" />
     <param name="offline" type="bool" value="$(arg offline)" />
     <param name="calfile" type="string" value="$(arg f_cal)" />

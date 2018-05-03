@@ -29,13 +29,13 @@ frames:
 thresholds:
   count:            1          # Min pulses/sweep to add to solver
   angle:            60.0       # Threshold on angle (in degres)
-  duration:         1.0        # Threshold on duration (in microsecs)
+  duration:         0.1        # Threshold on duration (in microsecs)
 
 # Publish rviz markers for the sensors
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            false
+correct:            true
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -60,22 +60,25 @@ tracker_stbd:
   extrinsics:      [0.000,  0.1625, -0.202, 0.0, 1.0, 0.0, 0.0]
 
 # Registration and calibration bundle resolution
-resolution:         0.2
+resolution:         0.1
 
-# CCALIBRATION OPTIONS
+# CALIBRATION OPTIONS
 
-# Assume that the motion of the body is static throughout the experiment
-static:             false
+# Tracker centroid to world offset
+offset:             [0.0, 0.0, -0.200]
+
+# REFINING OPTIONS
 
 # If dynamic, force z, roll and pitch to be constant when solving.
 force2d:            true
 
 # Smoothing factor
-smoothing:          1.0
+smoothing:          5.0
 
 # What else to refine, besides the trajectory
 refine:
-  lighthouses:      true       # Refine lighthouse positions
+  registration:     false      # Refine vive -> world transform
+  lighthouses:      false      # Refine lighthouse -> vive transform
   extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
   params:           false      # Refine lighthouse parameters

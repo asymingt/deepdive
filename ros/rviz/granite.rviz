@@ -123,7 +123,7 @@ Visualization Manager:
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: EKF
       Offset:
         X: 0
         Y: 0
@@ -146,7 +146,7 @@ Visualization Manager:
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: PORT M
       Offset:
         X: 0
         Y: 0
@@ -169,7 +169,7 @@ Visualization Manager:
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: PORT S
       Offset:
         X: 0
         Y: 0
@@ -185,14 +185,14 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
-      Color: 25; 255; 0
+      Color: 0; 170; 255
       Enabled: true
       Head Diameter: 0.300000012
       Head Length: 0.200000003
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: STBD M
       Offset:
         X: 0
         Y: 0
@@ -208,14 +208,14 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz/Path
-      Color: 25; 255; 0
+      Color: 0; 170; 255
       Enabled: true
       Head Diameter: 0.300000012
       Head Length: 0.200000003
       Length: 0.300000012
       Line Style: Lines
       Line Width: 0.0299999993
-      Name: Path
+      Name: STBD S
       Offset:
         X: 0
         Y: 0
@@ -226,6 +226,29 @@ Visualization Manager:
       Shaft Diameter: 0.100000001
       Shaft Length: 0.100000001
       Topic: /path/tracker_stbd/668207140
+      Unreliable: false
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 255; 170; 0
+      Enabled: true
+      Head Diameter: 0.300000012
+      Head Length: 0.200000003
+      Length: 0.300000012
+      Line Style: Lines
+      Line Width: 0.0299999993
+      Name: Estimate
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.0299999993
+      Shaft Diameter: 0.100000001
+      Shaft Length: 0.100000001
+      Topic: /path
       Unreliable: false
       Value: true
   Enabled: true
@@ -252,21 +275,26 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0
-      Class: rviz/TopDownOrtho
+      Class: rviz/Orbit
+      Distance: 6.16873598
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.0599999987
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
+      Focal Point:
+        X: -0.0800914019
+        Y: 0.433035702
+        Z: 0.304647535
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.0500000007
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.00999999978
-      Scale: 170.546997
+      Pitch: 0.934796929
       Target Frame: <Fixed Frame>
-      Value: TopDownOrtho (rviz)
-      X: 0
-      Y: 0
+      Value: Orbit (rviz)
+      Yaw: 4.5781827
     Saved: ~
 Window Geometry:
   Displays:

@@ -62,6 +62,7 @@ double thresh_duration_ = 1.0;
 ceres::Solver::Options options_;
 
 // What to solve for
+bool refine_registration_ = true;
 bool refine_lighthouses_ = false;
 bool refine_extrinsics_ = false;
 bool refine_sensors_ = false;
@@ -76,9 +77,6 @@ bool visualize_ = true;
 
 // Are we recording right now?
 bool recording_ = false;
-
-// Should we examine TF to use global correction information
-bool static_ = false;
 
 // Force the body frame to move on a plane
 bool force2d_ = false;
@@ -129,25 +127,26 @@ struct GroupCost {
   explicit GroupCost(Group const& group) : group_(group) {}
   // Called by ceres-solver to calculate error
   template <typename T>
-  bool operator()(const T* const vTl,         // Lighthouse -> vive
-                  const T* const vTb_pos_xy,  // Body -> world (pos xy)
-                  const T* const vTb_pos_z,   // Body -> world (pos z)
-                  const T* const vTb_rot_xy,  // Body -> world (rot xy)
-                  const T* const vTb_rot_z,   // Body -> world (rot z)
-                  const T* const bTh,         // Head -> tracking (light)
+  bool operator()(const T* const wTv,         // Vive -> World
+                  const T* const vTl,         // Lighthouse -> vive
+                  const T* const wTb_pos_xy,  // Body -> world (pos xy)
+                  const T* const wTb_pos_z,   // Body -> world (pos z)
+                  const T* const wTb_rot_xy,  // Body -> world (rot xy)
+                  const T* const wTb_rot_z,   // Body -> world (rot z)
+                  const T* const bTh,         // Head -> body
                   const T* const tTh,         // Head -> tracking (light)
                   const T* const sensors,     // Lighthouse calibration
                   const T* const params,      // Tracker extrinsics
                   T* residual) const {
     // The position of the sensor
-    T x[3], angle[2], vTb[6];
+    T x[3], angle[2], wTb[6];
     // Reconstruct a transform from the components
-    vTb[0] = vTb_pos_xy[0];
-    vTb[1] = vTb_pos_xy[1];
-    vTb[2] = vTb_pos_z[0];
-    vTb[3] = vTb_rot_xy[0];
-    vTb[4] = vTb_rot_xy[1];
-    vTb[5] = vTb_rot_z[0];
+    wTb[0] = wTb_pos_xy[0];
+    wTb[1] = wTb_pos_xy[1];
+    wTb[2] = wTb_pos_z[0];
+    wTb[3] = wTb_rot_xy[0];
+    wTb[4] = wTb_rot_xy[1];
+    wTb[5] = wTb_rot_z[0];
     // Used to index the residual
     size_t cnt = 0;
     // Iterate over all measurements
@@ -163,11 +162,11 @@ struct GroupCost {
       // Project the sensor position into the lighthouse frame
       InverseTransformInPlace(tTh, x);    // light -> head
       TransformInPlace(bTh, x);           // head -> body
-      TransformInPlace(vTb, x);           // body -> vive
+      TransformInPlace(wTb, x);           // body -> world
+      InverseTransformInPlace(wTv, x);    // world -> vive
       InverseTransformInPlace(vTl, x);    // vive -> lighthouse
-      // Predict the angles
-      angle[0] = atan2(x[1], x[2]);
-      angle[1] = atan2(x[0], x[2]);
+      // Predict the angles - Note that the 
+      Predict(params, x, angle, correct_);
       // The residual angle error for the specific axis
       residual[cnt++] = angle[a] - T(gt->second);
     }
@@ -176,6 +175,32 @@ struct GroupCost {
  // Internal variables
  private:
   Group group_;
+};
+
+// Residual error between the current state and this correction
+struct CorrectionCost {
+  explicit CorrectionCost(double wTb[6]) {
+    for (size_t i = 0; i < 6; i++)
+      wTb_[i] = wTb[i];
+  }
+  // Called by ceres-solver to calculate error
+  template <typename T>
+  bool operator()(const T* const wTb_pos_xy,  // Body -> world (pos xy)
+                  const T* const wTb_pos_z,   // Body -> world (pos z)
+                  const T* const wTb_rot_xy,  // Body -> world (rot xy)
+                  const T* const wTb_rot_z,   // Body -> world (rot z)
+                  T* residual) const {
+    // Residual error is easy to calculate
+    residual[0] =  wTb_pos_xy[0] - wTb_[0];
+    residual[1] =  wTb_pos_xy[1] - wTb_[1];
+    residual[2] =  wTb_pos_z[0] - wTb_[2];
+    residual[3] =  wTb_rot_xy[0] - wTb_[3];
+    residual[4] =  wTb_rot_xy[1] - wTb_[4];
+    residual[5] =  wTb_rot_z[0] - wTb_[5];
+    return true;
+  }
+ private:
+  double wTb_[6];
 };
 
 // Residual error between sequential poses
@@ -249,7 +274,7 @@ bool Solve() {
     >
   > bundle;
 
-  std::map<ros::Time, double[6]> cor;
+  std::map<ros::Time, double[6]> corr;
 
   double height = 0.0;
 
@@ -277,12 +302,12 @@ bool Solve() {
         ct->second.transform.rotation.y,
         ct->second.transform.rotation.z);
       Eigen::AngleAxisd aa(q.toRotationMatrix());
-      cor[t][0] = ct->second.transform.translation.x;
-      cor[t][1] = ct->second.transform.translation.y;
-      cor[t][2] = ct->second.transform.translation.z;
-      cor[t][3] = aa.angle() * aa.axis()[0];
-      cor[t][4] = aa.angle() * aa.axis()[1];
-      cor[t][5] = aa.angle() * aa.axis()[2];
+      corr[t][0] = ct->second.transform.translation.x;
+      corr[t][1] = ct->second.transform.translation.y;
+      corr[t][2] = ct->second.transform.translation.z;
+      corr[t][3] = aa.angle() * aa.axis()[0];
+      corr[t][4] = aa.angle() * aa.axis()[1];
+      corr[t][5] = aa.angle() * aa.axis()[2];
       height += ct->second.transform.translation.z;
     }
     if (!corrections_.empty())
@@ -292,14 +317,12 @@ bool Solve() {
 
   // CREATE PROBLEM
 
-  std::map<ros::Time, double[6]> vTb;
-
-  double pose[6];
+  std::map<ros::Time, double[6]> wTb;
 
   // We use non-linear least squares optimization to jointly solve for the
   // sensor trajectory and extrinsics (if selected) 
   {
-    ROS_INFO("Jointly solving for sensor trajectory in vive frame.");
+    ROS_INFO("Solving the non-linear least squares optimization problem.");
     ceres::Problem problem;
     bool fixed = false;
     TrackerMap::iterator tt;
@@ -326,55 +349,46 @@ bool Solve() {
           {
             // Add the cost function
             ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
-              GroupCost, ceres::DYNAMIC, 6, 2, 1, 2, 1, 6, 6,
+              GroupCost, ceres::DYNAMIC, 6, 6, 2, 1, 2, 1, 6, 6,
                 NUM_SENSORS * 6, NUM_PARAMS>(new GroupCost(group), group.size());
             // Add the residual block
             problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-              reinterpret_cast<double*>(lt->second.vTl),
-              reinterpret_cast<double*>(static_ ? &pose[0] : &vTb[bt->first][0]),
-              reinterpret_cast<double*>(static_ ? &pose[2] : &vTb[bt->first][2]),
-              reinterpret_cast<double*>(static_ ? &pose[3] : &vTb[bt->first][3]),
-              reinterpret_cast<double*>(static_ ? &pose[5] : &vTb[bt->first][5]),
+              reinterpret_cast<double*>(registration_),       // wTv
+              reinterpret_cast<double*>(lt->second.vTl),      // vTl
+              reinterpret_cast<double*>(&wTb[bt->first][0]),  // pos: xy
+              reinterpret_cast<double*>(&wTb[bt->first][2]),  // pos: z
+              reinterpret_cast<double*>(&wTb[bt->first][3]),  // rot: xy
+              reinterpret_cast<double*>(&wTb[bt->first][5]),  // rot: z
               reinterpret_cast<double*>(tt->second.bTh),
               reinterpret_cast<double*>(tt->second.tTh),
               reinterpret_cast<double*>(tt->second.sensors),
               reinterpret_cast<double*>(lt->second.params));
             // If we are forcing 2D add some constraints...
             if (force2d_) {
-              if (static_) {
-                pose[2] = height;
-                pose[3] = 0.0;
-                pose[4] = 0.0;
-                problem.SetParameterBlockConstant(&pose[2]);
-                problem.SetParameterBlockConstant(&pose[3]);
-              } else {
-                vTb[bt->first][2] = height;
-                vTb[bt->first][3] = 0.0;
-                vTb[bt->first][4] = 0.0;
-                problem.SetParameterBlockConstant(&vTb[bt->first][2]);
-                problem.SetParameterBlockConstant(&vTb[bt->first][3]);
-              }
+              wTb[bt->first][2] = height;
+              wTb[bt->first][3] = 0.0;
+              wTb[bt->first][4] = 0.0;
+              problem.SetParameterBlockConstant(&wTb[bt->first][2]);
+              problem.SetParameterBlockConstant(&wTb[bt->first][3]);
             }
           }
           // If we have a previous node, then link with a motion cost
-          if (!static_ && smoothing_ > 0) {
-            std::map<ros::Time, double[6]>::iterator curr = vTb.find(bt->first);
-            std::map<ros::Time, double[6]>::iterator prev = std::prev(curr);
-            if (prev != vTb.end() && prev != curr) {
-              // Create a cost function to represent motion
-              ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-                    <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
-              // Add a residual block for error
-              problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-                reinterpret_cast<double*>(&prev->second[0]),  // pos: xy
-                reinterpret_cast<double*>(&prev->second[2]),  // pos: z
-                reinterpret_cast<double*>(&prev->second[3]),  // rot: xy
-                reinterpret_cast<double*>(&prev->second[5]),  // rot: z
-                reinterpret_cast<double*>(&vTb[bt->first][0]),      // pos: xy
-                reinterpret_cast<double*>(&vTb[bt->first][2]),      // pos: z
-                reinterpret_cast<double*>(&vTb[bt->first][3]),      // rot: xy
-                reinterpret_cast<double*>(&vTb[bt->first][5]));     // rot: z
-            }
+          std::map<ros::Time, double[6]>::iterator curr = wTb.find(bt->first);
+          std::map<ros::Time, double[6]>::iterator prev = std::prev(curr);
+          if (prev != wTb.end() && prev != curr && smoothing_ > 0) {
+            // Create a cost function to represent motion
+            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+                  <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
+            // Add a residual block for error
+            problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+              reinterpret_cast<double*>(&prev->second[0]),  // pos: xy
+              reinterpret_cast<double*>(&prev->second[2]),  // pos: z
+              reinterpret_cast<double*>(&prev->second[3]),  // rot: xy
+              reinterpret_cast<double*>(&prev->second[5]),  // rot: z
+              reinterpret_cast<double*>(&wTb[bt->first][0]),      // pos: xy
+              reinterpret_cast<double*>(&wTb[bt->first][2]),      // pos: z
+              reinterpret_cast<double*>(&wTb[bt->first][3]),      // rot: xy
+              reinterpret_cast<double*>(&wTb[bt->first][5]));     // rot: z
           }
         }
         // Fix lighthouse parameters
@@ -391,86 +405,49 @@ bool Solve() {
       if (!refine_sensors_)
         problem.SetParameterBlockConstant(tt->second.sensors);
     }
+    // Fix global parameters
+    if (!refine_registration_)
+      problem.SetParameterBlockConstant(registration_);
     // Now solve the problem
     ceres::Solver::Summary summary;
     ceres::Solve(options_, &problem, &summary);
-    if (!summary.IsSolutionUsable()) {
-      ROS_INFO("Could not find usable Solution.");
+    if (summary.IsSolutionUsable()) {
+      ROS_INFO("Usable solution found.");
+      if (visualize_) {
+        nav_msgs::Path msg;
+        msg.header.stamp = ros::Time::now();
+        msg.header.frame_id = frame_world_;
+        std::map<ros::Time, double[6]>::iterator it;
+        for (it = wTb.begin(); it != wTb.end(); it++) {
+          geometry_msgs::PoseStamped ps;
+          Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
+          Eigen::AngleAxisd aa;
+          if (v.norm() > 0) {
+            aa.angle() = v.norm();
+            aa.axis() = v.normalized();
+          }
+          Eigen::Quaterniond q(aa);
+          ps.header.stamp = it->first;
+          ps.header.frame_id = frame_world_;
+          ps.pose.position.x = it->second[0];
+          ps.pose.position.y = it->second[1];
+          ps.pose.position.z = it->second[2];
+          ps.pose.orientation.w = q.w();
+          ps.pose.orientation.x = q.x();
+          ps.pose.orientation.y = q.y();
+          ps.pose.orientation.z = q.z();
+          msg.poses.push_back(ps);
+        }
+        pub_path_.publish(msg);
+      }
+      // Update transforms
+      SendTransforms(frame_world_, frame_vive_, frame_body_,
+        registration_, lighthouses_, trackers_);
+    } else {
+      ROS_WARN("Solution is not usable.");
       return false;
     }
   }
-
-  // REGISTRATION
-  {
-    ROS_INFO("Using corrections to register world to vive frame.");
-    std::vector<ros::Time> ts;
-    // Get the number of overlapping timestamps
-    std::map<ros::Time, double[6]>::iterator it;
-    for (it = vTb.begin(); it != vTb.end(); it++)
-      if (cor.find(it->first) != cor.end())
-        ts.push_back(it->first);
-    ROS_INFO_STREAM("- Using " << ts.size() << " correspondences");
-    // Run kabsch to determine the projection from the slave to master
-    Eigen::Matrix<double, 3, Eigen::Dynamic> pti(3, ts.size());
-    Eigen::Matrix<double, 3, Eigen::Dynamic> ptj(3, ts.size());
-    for (size_t i = 0; i < ts.size(); i++) {
-      ros::Time & t = ts[i];
-      pti.block<3, 1>(0, i) = Eigen::Vector3d(vTb[t][0], vTb[t][1], vTb[t][2]);
-      ptj.block<3, 1>(0, i) = Eigen::Vector3d(cor[t][0], cor[t][1], cor[t][2]);
-    }
-    // Perform Kabsch to find the projection that maps the vive to world frames
-    Eigen::Affine3d A;
-    if (Kabsch<double>(pti, ptj, A, false))
-      ROS_INFO_STREAM("- Solution " << A.translation().norm());
-    else
-      ROS_INFO("- Solution not found");
-    // Write the solution
-    registration_[0] = A.translation()[0];
-    registration_[1] = A.translation()[1];
-    registration_[2] = A.translation()[2];
-    Eigen::AngleAxisd aa(A.linear());
-    registration_[3] =  aa.angle() * aa.axis()[0];
-    registration_[4] =  aa.angle() * aa.axis()[1];
-    registration_[5] =  aa.angle() * aa.axis()[2];
-  }
-
-  // VISUALIZATION
-  if (visualize_) {
-    nav_msgs::Path msg;
-    msg.header.stamp = ros::Time::now();
-    msg.header.frame_id = frame_vive_;
-    std::map<ros::Time, double[6]>::iterator it;
-    for (it = vTb.begin(); it != vTb.end(); it++) {
-      geometry_msgs::PoseStamped ps;
-      Eigen::Vector3d v(it->second[3], it->second[4], it->second[5]);
-      Eigen::AngleAxisd aa;
-      if (v.norm() > 0) {
-        aa.angle() = v.norm();
-        aa.axis() = v.normalized();
-      }
-      Eigen::Quaterniond q(aa);
-      ps.header.stamp = it->first;
-      ps.header.frame_id = frame_world_;
-      ps.pose.position.x = it->second[0];
-      ps.pose.position.y = it->second[1];
-      ps.pose.position.z = it->second[2];
-      ps.pose.orientation.w = q.w();
-      ps.pose.orientation.x = q.x();
-      ps.pose.orientation.y = q.y();
-      ps.pose.orientation.z = q.z();
-      msg.poses.push_back(ps);
-    }
-    pub_path_.publish(msg);
-  }
-  // Update transforms
-  SendTransforms(frame_world_, frame_vive_, frame_body_,
-    registration_, lighthouses_, trackers_);
-    // Write the solution to a config file
-  if (WriteConfig(calfile_, frame_world_, frame_vive_, frame_body_,
-    registration_, lighthouses_, trackers_))
-    ROS_INFO_STREAM("Calibration written to " << calfile_);
-  else
-    ROS_WARN_STREAM("Calibration could not be written to " << calfile_);
   return true;
 }
 
@@ -609,7 +586,7 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
 
 int main(int argc, char **argv) {
   // Initialize ROS and create node handle
-  ros::init(argc, argv, "deepdive_calibration");
+  ros::init(argc, argv, "deepdive_registration");
   ros::NodeHandle nh("~");
 
   // If we are in offline mode when we will replay the data back at 10x the
@@ -653,10 +630,6 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get correct parameter.");
 
   // Whether to apply light corrections
-  if (!nh.getParam("static", static_))
-    ROS_FATAL("Failed to get static parameter.");
-
-  // Whether to apply light corrections
   if (!nh.getParam("force2d", force2d_))
     ROS_FATAL("Failed to get force2d parameter.");
 
@@ -665,6 +638,8 @@ int main(int argc, char **argv) {
     ROS_FATAL("Failed to get smoothing parameter.");
 
   // What to refine
+  if (!nh.getParam("refine/registration", refine_registration_))
+    ROS_FATAL("Failed to get refine/registration parameter.");
   if (!nh.getParam("refine/lighthouses", refine_lighthouses_))
     ROS_FATAL("Failed to get refine/lighthouses parameter.");
   if (!nh.getParam("refine/extrinsics", refine_extrinsics_))
@@ -756,14 +731,12 @@ int main(int argc, char **argv) {
   // If reading the configuration file results in inserting the correct
   // number of static transforms into the problem, then we can publish
   // the solution for use by other entities in the system.
-  /*
   if (ReadConfig(calfile_, frame_world_, frame_vive_, frame_body_,
     registration_, lighthouses_, trackers_)) {
     ROS_INFO("Read transforms from calibration");
   } else {
     ROS_INFO("Could not read calibration file");
   }
-  */
   SendTransforms(frame_world_, frame_vive_, frame_body_,
     registration_, lighthouses_, trackers_);
 

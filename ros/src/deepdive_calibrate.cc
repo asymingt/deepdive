@@ -46,9 +46,6 @@ std::string frame_vive_ = "vive";       // Vive frame
 std::string frame_body_ = "body";       // EKF / external solution
 std::string frame_truth_ = "truth";     // Vive solution
 
-// Whether to apply corrections
-bool correct_ = false;
-
 // Rejection thresholds
 int thresh_count_ = 4;
 double thresh_angle_ = 60.0;
@@ -63,8 +60,14 @@ bool visualize_ = true;
 // Are we recording right now?
 bool recording_ = false;
 
+// Should we correct lighthouse measurements
+bool correct_ = false;
+
 // Graph resolution
 double res_ = 0.1;
+
+// Tracker  centroid from body frame
+std::vector<double> offset_;
 
 // World -> vive registatration
 double registration_[6];
@@ -205,16 +208,7 @@ bool Solve() {
                 !Mean(bundle[tt->first][lt->first][bt->first][s][1], angles[1]))
               continue;
             // Correct the angles using the lighthouse parameters
-            if (correct_) { 
-              Lighthouse const& lh = lt->second;
-              for (uint8_t a = 0; a < 2; a++) {
-                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_PHASE];
-                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_TILT] * angles[1-a];
-                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_CURVE] * angles[1-a] * angles[1-a];
-                angles[a] -= lh.params[a*NUM_PARAMS + PARAM_GIB_MAG] * std::cos(
-                  angles[1-a] + lh.params[a*NUM_PARAMS + PARAM_GIB_PHASE]);
-              }
-            }
+            Correct(lt->second.params, angles, correct_);
             // Push on the correct world sensor position
             obj.push_back(cv::Point3f(
               trackers_[tt->first].sensors[s * 6 + 0],
@@ -360,7 +354,11 @@ bool Solve() {
         corresp.push_back(
           std::pair<Eigen::Vector3d, Eigen::Vector3d>(
             Eigen::Vector3d(x / n, y / n, z / n),
-            Eigen::Vector3d(ct->second[0], ct->second[1], ct->second[2])
+            Eigen::Vector3d(
+              ct->second[0] + offset_[0],
+              ct->second[1] + offset_[1],
+              ct->second[2] + offset_[2]
+            )
           )
         );
       }
@@ -610,7 +608,7 @@ void NewTrackerCallback(TrackerMap::iterator tracker) {
 
 int main(int argc, char **argv) {
   // Initialize ROS and create node handle
-  ros::init(argc, argv, "deepdive_test");
+  ros::init(argc, argv, "deepdive_calibrate");
   ros::NodeHandle nh("~");
 
   // If we are in offline mode when we will replay the data back at 10x the
@@ -660,6 +658,12 @@ int main(int argc, char **argv) {
   // Visualization option
   if (!nh.getParam("visualize", visualize_))
     ROS_FATAL("Failed to get the visualize parameter.");
+
+  // Get the offset of the tracker centroid and the body
+  if (!nh.getParam("offset", offset_))
+    ROS_FATAL("Failed to get the lighthouse transform.");
+  if (offset_.size() != 3)
+    ROS_FATAL("Failed to parse lighthouse transform.");
 
   // Get the parent information
   std::vector<std::string> lighthouses;
@@ -723,17 +727,7 @@ int main(int argc, char **argv) {
         "/path/" + *jt + "/" + lt->first, 10, true);
   }
 
-  // If reading the configuration file results in inserting the correct
-  // number of static transforms into the problem, then we can publish
-  // the solution for use by other entities in the system.
-  /*
-  if (ReadConfig(calfile_, frame_world_, frame_vive_, frame_body_,
-    registration_, lighthouses_, trackers_)) {
-    ROS_INFO("Read transforms from calibration");
-  } else {
-    ROS_INFO("Could not read calibration file");
-  }
-  */
+  // Send the transforms out
   SendTransforms(frame_world_, frame_vive_, frame_body_,
     registration_, lighthouses_, trackers_);
 

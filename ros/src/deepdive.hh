@@ -228,5 +228,43 @@ static bool Kabsch(
   return true;
 }
 
+// Lighthouse correction
+// see: https://github.com/cnlohr/libsurvive/wiki/BSD-Calibration-Values
+
+// Given a point in space, predict the lighthouse angle
+template <typename T>
+static void Predict(T const* params, T const* xyz, T* ang, bool correct) {
+  if (correct) {
+    ang[0] = atan2(xyz[0] - (params[0*NUM_PARAMS + PARAM_TILT] + params[0*NUM_PARAMS + PARAM_CURVE] * xyz[1]) * xyz[1], xyz[2]);
+    ang[1] = atan2(xyz[1] - (params[1*NUM_PARAMS + PARAM_TILT] + params[1*NUM_PARAMS + PARAM_CURVE] * xyz[0]) * xyz[0], xyz[2]);
+    ang[0] -= params[0*NUM_PARAMS + PARAM_PHASE] + params[0*NUM_PARAMS + PARAM_GIB_MAG] * sin(ang[0] + params[0*NUM_PARAMS + PARAM_GIB_PHASE]);
+    ang[1] -= params[1*NUM_PARAMS + PARAM_PHASE] + params[1*NUM_PARAMS + PARAM_GIB_MAG] * sin(ang[1] + params[1*NUM_PARAMS + PARAM_GIB_PHASE]);
+  } else {
+    ang[0] = atan2(xyz[0], xyz[2]);
+    ang[1] = atan2(xyz[1], xyz[2]);
+  }
+}
+
+// Given the lighthouse angle, predict the point in space
+template <typename T>
+static void Correct(T const* params, T * angle, bool correct) {
+  if (correct) {
+    T ideal[2], pred[2], xyz[3];
+    ideal[0] = angle[0];
+    ideal[1] = angle[1];
+    for (size_t i = 0; i < 10; i++) {
+      xyz[0] = tan(ideal[0]);
+      xyz[1] = tan(ideal[1]);
+      xyz[2] = T(1.0);
+      Predict(params, xyz, pred, correct);
+      ideal[0] += (angle[0] - pred[0]);
+      ideal[1] += (angle[1] - pred[1]);
+    }
+    angle[0] = ideal[0];
+    angle[1] = ideal[1];
+  }
+}
+
+
 #endif
 
