@@ -70,10 +70,10 @@ offset:             [0.0, 0.0, -0.200]
 # REFINING OPTIONS
 
 # If dynamic, force z, roll and pitch to be constant when solving.
-force2d:            true
+force2d:            false
 
 # Smoothing factor
-smoothing:          5.0
+smoothing:          0.0
 
 # What else to refine, besides the trajectory
 refine:

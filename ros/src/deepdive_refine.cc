@@ -18,6 +18,9 @@
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
 
+// We will use OpenCV to bootstrap solution
+#include <opencv2/calib3d/calib3d.hpp>
+
 // Ceres and logging
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -119,69 +122,48 @@ void InverseTransformInPlace(const T transform[6], T x[3]) {
   ceres::AngleAxisRotatePoint(aa, tmp, x);
 }
 
+// Helper function to apply a rotation b = Ra
+template <typename T> inline
+void RotateInPlace(const T transform[6], T x[3]) {
+  T tmp[3];
+  ceres::AngleAxisRotatePoint(&transform[3], x, tmp);
+  x[0] = tmp[0];
+  x[1] = tmp[1];
+  x[2] = tmp[2];
+}
+
+// Helper function to invert a rotation a = R'b
+template <typename T> inline
+void InverseRotateInPlace(const T transform[6], T x[3]) {
+  T aa[3], tmp[3];
+  tmp[0] = x[0];
+  tmp[1] = x[1];
+  tmp[2] = x[2];
+  aa[0] = -transform[3];
+  aa[1] = -transform[4];
+  aa[2] = -transform[5];
+  ceres::AngleAxisRotatePoint(aa, tmp, x);
+}
+
 // Group of light measurements -- essential for accuracy
 typedef std::map<std::pair<uint16_t, uint8_t>, double> Group;
 
 // Residual error between predicted angles to a lighthouse
-struct GroupCost {
-  explicit GroupCost(Group const& group) : group_(group) {}
-  // Called by ceres-solver to calculate error
-  template <typename T>
-  bool operator()(const T* const wTv,         // Vive -> World
-                  const T* const vTl,         // Lighthouse -> vive
-                  const T* const wTb_pos_xy,  // Body -> world (pos xy)
-                  const T* const wTb_pos_z,   // Body -> world (pos z)
-                  const T* const wTb_rot_xy,  // Body -> world (rot xy)
-                  const T* const wTb_rot_z,   // Body -> world (rot z)
-                  const T* const bTh,         // Head -> body
-                  const T* const tTh,         // Head -> tracking (light)
-                  const T* const sensors,     // Lighthouse calibration
-                  const T* const params,      // Tracker extrinsics
-                  T* residual) const {
-    // The position of the sensor
-    T x[3], angle[2], wTb[6];
-    // Reconstruct a transform from the components
-    wTb[0] = wTb_pos_xy[0];
-    wTb[1] = wTb_pos_xy[1];
-    wTb[2] = wTb_pos_z[0];
-    wTb[3] = wTb_rot_xy[0];
-    wTb[4] = wTb_rot_xy[1];
-    wTb[5] = wTb_rot_z[0];
-    // Used to index the residual
-    size_t cnt = 0;
-    // Iterate over all measurements
-    Group::const_iterator gt;
-    for (gt = group_.begin(); gt != group_.end(); gt++) {
-      // Get the sensor and axis for this group
-      uint16_t const& s = gt->first.first;
-      uint8_t const& a = gt->first.second;
-      // Get the sensor position in the tracking frame
-      x[0] = sensors[6*s+0];
-      x[1] = sensors[6*s+1];
-      x[2] = sensors[6*s+2];
-      // Project the sensor position into the lighthouse frame
-      InverseTransformInPlace(tTh, x);    // light -> head
-      TransformInPlace(bTh, x);           // head -> body
-      TransformInPlace(wTb, x);           // body -> world
-      InverseTransformInPlace(wTv, x);    // world -> vive
-      InverseTransformInPlace(vTl, x);    // vive -> lighthouse
-      // Predict the angles - Note that the 
-      Predict(params, x, angle, correct_);
-      // The residual angle error for the specific axis
-      residual[cnt++] = angle[a] - T(gt->second);
-    }
-    return true;
-  }
- // Internal variables
- private:
-  Group group_;
-};
-
-// Residual error between the current state and this correction
-struct CorrectionCost {
-  explicit CorrectionCost(double wTb[6]) {
+struct LightCost {
+  explicit LightCost(std::string const& l, std::string const& t, double p[6]) {
+    // Copy over the observation
     for (size_t i = 0; i < 6; i++)
-      wTb_[i] = wTb[i];
+      obs_[i] = p[i];
+    // First, move the position from the lh -> tracker to the world ->body
+    TransformInPlace(lighthouses_[l].vTl, &obs_[0]);       // lh -> vive
+    TransformInPlace(registration_, &obs_[0]);             // vive -> world
+    InverseTransformInPlace(trackers_[t].tTh, &obs_[0]);   // light -> head
+    TransformInPlace(trackers_[t].bTh, &obs_[0]);          // head -> body
+    // First, move the attittude from the lh -> tracker to the world ->body
+    InverseRotateInPlace(lighthouses_[l].vTl, &obs_[3]);          // lh -> vive
+    InverseRotateInPlace(registration_, &obs_[3]);                // vive -> world
+    RotateInPlace(trackers_[t].tTh, &obs_[3]);      // light -> head
+    InverseRotateInPlace(trackers_[t].bTh, &obs_[3]);             // head -> body
   }
   // Called by ceres-solver to calculate error
   template <typename T>
@@ -190,17 +172,17 @@ struct CorrectionCost {
                   const T* const wTb_rot_xy,  // Body -> world (rot xy)
                   const T* const wTb_rot_z,   // Body -> world (rot z)
                   T* residual) const {
-    // Residual error is easy to calculate
-    residual[0] =  wTb_pos_xy[0] - wTb_[0];
-    residual[1] =  wTb_pos_xy[1] - wTb_[1];
-    residual[2] =  wTb_pos_z[0] - wTb_[2];
-    residual[3] =  wTb_rot_xy[0] - wTb_[3];
-    residual[4] =  wTb_rot_xy[1] - wTb_[4];
-    residual[5] =  wTb_rot_z[0] - wTb_[5];
+    residual[0] = wTb_pos_xy[0] - obs_[0];
+    residual[1] = wTb_pos_xy[1] - obs_[1];
+    residual[2] = wTb_pos_z[0] - obs_[2];
+    residual[3] = wTb_rot_xy[0] - obs_[3];
+    residual[4] = wTb_rot_xy[1] - obs_[4];
+    residual[5] = wTb_rot_z[0] - obs_[5];
     return true;
   }
+ // Internal variables
  private:
-  double wTb_[6];
+  double obs_[6];   // Observed pose in the world frame
 };
 
 // Residual error between sequential poses
@@ -315,99 +297,120 @@ bool Solve() {
     ROS_INFO_STREAM("Average height is " << height << " meters");
   }
 
-  // CREATE PROBLEM
-
+  // The ultimate quantity we are solving for
   std::map<ros::Time, double[6]> wTb;
 
-  // We use non-linear least squares optimization to jointly solve for the
-  // sensor trajectory and extrinsics (if selected) 
+  // We are going to estimate the pose of each slave lighthouse in the frame
+  // of the master lighthouse (vive frame) using PNP. We can think of the
+  // two lighthouses as a stereo pair that are looking at a set of corresp-
+  // ondences (photosensors). We want to calibrate this stereo pair.
   {
-    ROS_INFO("Solving the non-linear least squares optimization problem.");
+    ROS_INFO("Using P3P to estimate tracker pose in light frame.");
+    // Create a new ceres problem to solve
     ceres::Problem problem;
-    bool fixed = false;
-    TrackerMap::iterator tt;
-    for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
-      LighthouseMap::iterator lt;                         //
-      for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
-        if (lt == lighthouses_.begin())
-          for (size_t i = 0; i < 6; i++)
-            lt->second.vTl[i] = 0.0;
-        Bundle::iterator bt = bundle[tt->first][lt->first].begin();
-        for (; bt != bundle[tt->first][lt->first].end(); bt++) {
-          // Merge all bundled data into a group
-          Group group;
+    // Various lighjthouse parameters
+    double fov = 2.0944;                          // 120deg FOV
+    double w = 1.0;                               // 1m synthetic image plane
+    double z = w / (2.0 * std::tan(fov / 2.0));   // Principle distance
+    uint32_t count = 0;                           // Track num transforms
+    // Iterate over lighthouses
+    LighthouseMap::iterator lt;
+    for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+      // Iterate over trackers
+      TrackerMap::iterator tt;
+      for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+        ROS_INFO_STREAM("- Slave " << lt->first << " and tracker " << tt->first);
+        // Iterate over time epochs
+        Bundle::iterator bt;
+        for (bt = bundle[tt->first][lt->first].begin();
+          bt != bundle[tt->first][lt->first].end(); bt++) {
+          // One for each time instance
+          std::vector<cv::Point3f> obj;
+          std::vector<cv::Point2f> img;
+          // Try and find correspondences for every possible sensor
           for (uint8_t s = 0; s < NUM_SENSORS; s++) {
-            double angle = 0.0;
-            if (Mean(bundle[tt->first][lt->first][bt->first][s][0], angle))
-              group[std::pair<uint16_t, uint8_t>(s, 0)] = angle;
-            if (Mean(bundle[tt->first][lt->first][bt->first][s][1], angle))
-              group[std::pair<uint16_t, uint8_t>(s, 1)] = angle;
+            // Mean angles for the <lighthouse, axis>
+            double angles[2];
+            // Check that we have azimuth/elevation for both lighthouses
+            if (!Mean(bundle[tt->first][lt->first][bt->first][s][0], angles[0]) ||
+                !Mean(bundle[tt->first][lt->first][bt->first][s][1], angles[1]))
+              continue;
+            // Correct the angles using the lighthouse parameters
+            Correct(lt->second.params, angles, correct_);
+            // Push on the correct world sensor position
+            obj.push_back(cv::Point3f(
+              trackers_[tt->first].sensors[s * 6 + 0],
+              trackers_[tt->first].sensors[s * 6 + 1],
+              trackers_[tt->first].sensors[s * 6 + 2]));
+            // Push on the coordinate in the slave image plane
+            img.push_back(cv::Point2f(z * tan(angles[0]), z * tan(angles[1])));
           }
-          // We should only include this measurement if we have enough data
-          if (group.size() < 4)
-            continue;
-          {
-            // Add the cost function
-            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<
-              GroupCost, ceres::DYNAMIC, 6, 6, 2, 1, 2, 1, 6, 6,
-                NUM_SENSORS * 6, NUM_PARAMS>(new GroupCost(group), group.size());
-            // Add the residual block
-            problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-              reinterpret_cast<double*>(registration_),       // wTv
-              reinterpret_cast<double*>(lt->second.vTl),      // vTl
-              reinterpret_cast<double*>(&wTb[bt->first][0]),  // pos: xy
-              reinterpret_cast<double*>(&wTb[bt->first][2]),  // pos: z
-              reinterpret_cast<double*>(&wTb[bt->first][3]),  // rot: xy
-              reinterpret_cast<double*>(&wTb[bt->first][5]),  // rot: z
-              reinterpret_cast<double*>(tt->second.bTh),
-              reinterpret_cast<double*>(tt->second.tTh),
-              reinterpret_cast<double*>(tt->second.sensors),
-              reinterpret_cast<double*>(lt->second.params));
-            // If we are forcing 2D add some constraints...
-            if (force2d_) {
-              wTb[bt->first][2] = height;
-              wTb[bt->first][3] = 0.0;
-              wTb[bt->first][4] = 0.0;
-              problem.SetParameterBlockConstant(&wTb[bt->first][2]);
-              problem.SetParameterBlockConstant(&wTb[bt->first][3]);
+          // In the case that we have 4 or more measurements, then we can try
+          // and estimate the trackers location in the lighthouse frame.
+          if (obj.size() > 3) {
+            cv::Mat cam = cv::Mat::eye(3, 3, cv::DataType<double>::type);
+            cv::Mat dist;
+            cam.at<double>(0, 0) = z;
+            cam.at<double>(1, 1) = z;
+            cv::Mat R(3, 1, cv::DataType<double>::type);
+            cv::Mat T(3, 1, cv::DataType<double>::type);
+            cv::Mat C(3, 3, cv::DataType<double>::type);
+            if (cv::solvePnP(obj, img, cam, dist, R, T, false, cv::SOLVEPNP_EPNP)) {
+              cv::Rodrigues(R, C);
+              Eigen::Matrix3d rot;
+              for (size_t r = 0; r < 3; r++)
+                for (size_t c = 0; c < 3; c++)
+                  rot(r, c) = C.at<double>(r, c);
+              Eigen::AngleAxisd aa(rot);
+              // Pose of the given tracker in the given lighthouse frame
+              double pose[6];
+              pose[0] = T.at<double>(0, 0);
+              pose[1] = T.at<double>(1, 0);
+              pose[2] = T.at<double>(2, 0);
+              pose[3] = aa.angle() * aa.axis()[0];
+              pose[4] = aa.angle() * aa.axis()[1];
+              pose[5] = aa.angle() * aa.axis()[2];
+              // Add this observation to the problem
+              ceres::CostFunction* cost = new ceres::AutoDiffCostFunction<LightCost,
+                6, 2, 1, 2, 1>(new LightCost(lt->first, tt->first, pose));
+              // Add the residual block
+              problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+                reinterpret_cast<double*>(&wTb[bt->first][0]),  // pos: xy
+                reinterpret_cast<double*>(&wTb[bt->first][2]),  // pos: z
+                reinterpret_cast<double*>(&wTb[bt->first][3]),  // rot: xy
+                reinterpret_cast<double*>(&wTb[bt->first][5])); // rot: z
+              // If we are forcing 2D add some constraints...
+              if (force2d_) {
+                wTb[bt->first][2] = height;
+                wTb[bt->first][3] = 0.0;
+                wTb[bt->first][4] = 0.0;
+                problem.SetParameterBlockConstant(&wTb[bt->first][2]);
+                problem.SetParameterBlockConstant(&wTb[bt->first][3]);
+              }
+              // If we have a previous node, then link with a motion cost
+              std::map<ros::Time, double[6]>::iterator c = wTb.find(bt->first);
+              std::map<ros::Time, double[6]>::iterator p = std::prev(c);
+              if (p != wTb.end() && p != c && smoothing_ > 0) {
+                // Create a cost function to represent motion
+                ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
+                      <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
+                // Add a residual block for error
+                problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
+                  reinterpret_cast<double*>(&p->second[0]),    // pos: xy
+                  reinterpret_cast<double*>(&p->second[2]),    // pos: z
+                  reinterpret_cast<double*>(&p->second[3]),    // rot: xy
+                  reinterpret_cast<double*>(&p->second[5]),    // rot: z
+                  reinterpret_cast<double*>(&c->second[0]),    // pos: xy
+                  reinterpret_cast<double*>(&c->second[2]),    // pos: z
+                  reinterpret_cast<double*>(&c->second[3]),    // rot: xy
+                  reinterpret_cast<double*>(&c->second[5]));   // rot: z
+              }
             }
           }
-          // If we have a previous node, then link with a motion cost
-          std::map<ros::Time, double[6]>::iterator curr = wTb.find(bt->first);
-          std::map<ros::Time, double[6]>::iterator prev = std::prev(curr);
-          if (prev != wTb.end() && prev != curr && smoothing_ > 0) {
-            // Create a cost function to represent motion
-            ceres::CostFunction* cost = new ceres::AutoDiffCostFunction
-                  <MotionCost, 6, 2, 1, 2, 1, 2, 1, 2, 1>(new MotionCost());
-            // Add a residual block for error
-            problem.AddResidualBlock(cost, new ceres::HuberLoss(1.0),
-              reinterpret_cast<double*>(&prev->second[0]),  // pos: xy
-              reinterpret_cast<double*>(&prev->second[2]),  // pos: z
-              reinterpret_cast<double*>(&prev->second[3]),  // rot: xy
-              reinterpret_cast<double*>(&prev->second[5]),  // rot: z
-              reinterpret_cast<double*>(&wTb[bt->first][0]),      // pos: xy
-              reinterpret_cast<double*>(&wTb[bt->first][2]),      // pos: z
-              reinterpret_cast<double*>(&wTb[bt->first][3]),      // rot: xy
-              reinterpret_cast<double*>(&wTb[bt->first][5]));     // rot: z
-          }
         }
-        // Fix lighthouse parameters
-        if (!refine_lighthouses_ || lt == lighthouses_.begin())
-          problem.SetParameterBlockConstant(lt->second.vTl);
-        if (!refine_params_)
-          problem.SetParameterBlockConstant(lt->second.params);
       }
-      // Fix tracker parameters 
-      if (!refine_extrinsics_)
-        problem.SetParameterBlockConstant(tt->second.bTh);
-      if (!refine_head_)
-        problem.SetParameterBlockConstant(tt->second.tTh);
-      if (!refine_sensors_)
-        problem.SetParameterBlockConstant(tt->second.sensors);
     }
-    // Fix global parameters
-    if (!refine_registration_)
-      problem.SetParameterBlockConstant(registration_);
+    ROS_INFO_STREAM("Solving optimization problem with " << count << " obs");
     // Now solve the problem
     ceres::Solver::Summary summary;
     ceres::Solve(options_, &problem, &summary);
@@ -440,7 +443,7 @@ bool Solve() {
         }
         pub_path_.publish(msg);
       }
-      // Update transforms
+      // Update transforms so we can see the solution iun rviz
       SendTransforms(frame_world_, frame_vive_, frame_body_,
         registration_, lighthouses_, trackers_);
     } else {

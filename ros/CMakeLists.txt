@@ -62,7 +62,7 @@ target_link_libraries(deepdive_calibrate deepdive_core ${OpenCV_LIBS})
 
 # Solver finds the world pose of every lighthouse
 cs_add_executable(deepdive_refine src/deepdive_refine.cc)
-target_link_libraries(deepdive_refine deepdive_core ${CERES_LIBRARIES})
+target_link_libraries(deepdive_refine deepdive_core ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 # Filter find the world pose of a soecific tracker
 cs_add_executable(deepdive_track src/deepdive_track.cc)
