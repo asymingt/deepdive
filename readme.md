@@ -41,7 +41,7 @@ Now checkout and build the code in a directory of your choice
     make -j2
     sudo make install
 
-You should now be able to use the deepdive_tool to probe your devices. Here is how the tool works:
+You should now be able to use the deepdive_tool to probe your devices. 
 
     Usage: deepdive_tool [-i01bth] [--help]
     This program extracts and prints data from a vive system.
@@ -53,7 +53,10 @@ You should now be able to use the deepdive_tool to probe your devices. Here is h
       -h, --lh                  print lighthouse info
       --help                    print this help and exit
 
-Note that deepdive does not begin streaming any lights data until a complete OOTX packet is received from a lighthouse. This is because the light cannot be corrected until the base station parameters are known.
+Note that deepdive does not begin streaming any lights data until a complete OOTX packet is received from a lighthouse. This is because the light cannot be corrected until the base station parameters are known. Try:
+
+    deepdive_tool -h
+
 
 # Installing the high-level ROS/C++ driver
 
@@ -108,19 +111,19 @@ The observed light angles are simple trigonometric functions of y, perturbed by 
 
 Where the transforms are defined as the following:
   
-  lTv = vive to lighthouse frame [lighthouse calibration]
-  vTw = world to vive frame [registration]
-  wTb = vive to lighthouse frame [predicted by the tracking algorithm]
-  bTh = head (bolt) to body frame [extrinsic calibration]
-  hTl = light to head frame [read from JSON]
+    lTv = vive to lighthouse frame [lighthouse calibration]
+    vTw = world to vive frame [registration]
+    wTb = vive to lighthouse frame [predicted by the tracking algorithm]
+    bTh = head (bolt) to body frame [extrinsic calibration]
+    hTl = light to head frame [read from JSON]
 
 Similarly, 
 
-  y = wTb bTh hTi x
+    y = wTb bTh hTi x
 
 Where 
 
-  hTi = IMU to head frame [read from JSON]
+    hTi = IMU to head frame [read from JSON]
 
 There are three components to the high-level driver
 
@@ -134,7 +137,7 @@ There are three components to the high-level driver
 
 # Example usage
 
-## Step 1 : Create your YAMLP profile
+## Step 1 : Create your YAML profile
 
 First, you'll need to know a bit about your hardware. You can use deepdive_tool with the -h switch to get information about your tracker and lighthouses:
 
