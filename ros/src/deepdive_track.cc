@@ -182,7 +182,7 @@ namespace UKF {
 
   // TRACKING FILTER
 
-  // Standard 6DoF kinematics with constant Omega and Acceleration assumption
+  // Standard 6DoF kinematics with constant Acceleration assumption
   template <> template <> State
   State::derivative<>() const {
     UKF::Quaternion omega_q;
@@ -239,19 +239,12 @@ namespace UKF {
                      * bTh_[context.tracker]               // head -> body
                      * tTh_[context.tracker].inverse()     // tracker -> head
                      * context.sensor;
-    UKF::Vector<2> angles;
-    angles[0] = std::atan2(x[0], x[2]);
-    angles[1] = std::atan2(x[1], x[2]);
-    uint8_t const& a = context.axis;
-    if (correct_) {
-      double const * const params = lighthouses_[context.lighthouse].params;
-      angles[a] += params[NUM_PARAMS*a + PARAM_PHASE];
-      angles[a] += params[NUM_PARAMS*a + PARAM_TILT] * angles[1-a];
-      angles[a] += params[NUM_PARAMS*a + PARAM_CURVE] * angles[1-a] * angles[1-a];
-      angles[a] += params[NUM_PARAMS*a + PARAM_GIB_MAG] *
-        std::cos(angles[1-a] + params[NUM_PARAMS*a + PARAM_GIB_PHASE]);
-    }
-    return angles[a];
+    double xyz[3], ang[2];
+    xyz[0] = x[0];
+    xyz[1] = x[1];
+    xyz[2] = x[2];
+    Predict(lighthouses_[context.lighthouse].params, xyz, ang, correct_);
+    return ang[context.axis];
   }
 
   // ERROR FILTER

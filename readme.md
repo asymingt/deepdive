@@ -200,7 +200,7 @@ Now, run this command:
 
 This will launch the deepdive_bridge and and record all data from all trackers to a file called first.bag. If you didn't specify the bag name it would be default record it to myprofile.bag. Note that a tracker might take several tens of seconds to start getting light data. For this reason I typically open another terminal to see which trackers and lighthouses are seen:
 
-    rostopic echo /light/frame/header_id
+    rostopic echo /light/header/frame_id
     rostopic echo /light/lighthouse
 
 Now, do something interesting with the trackers. When you are finished, press ctrl+c to end. This will safely stop recording and shut down.
@@ -208,6 +208,13 @@ Now, do something interesting with the trackers. When you are finished, press ct
 You can now get some information about how much data was recorded:
 
     rosbag info /path/to/deepdive/ros/data/first.bag
+
+Also, note that you can use the ```compress``` utility to reduce bag sizes. This is not necessary, but helps if you are checking you bag into git:
+
+    pushd /path/to/deepdive/ros/data
+    rosbag compress first.bag
+    rm -rf first.orig.bag
+    popd
 
 ## Step 2 : Run calibration
 
@@ -230,7 +237,7 @@ In many cases experimental scenarios it is OK to simply solve for the trajectory
 
 To do this, type the following command:
 
-    roslaunch deepdive_ros refine.launch profile:=myprofile bag:=first offline:= true speed:=5
+    roslaunch deepdive_ros refine.launch profile:=myprofile bag:=first offline:=true speed:=5
 
 By default, only the rigid body trajectory (wTb) is solved for, while everything else is held constant. You can change this in the YAML file.
 
@@ -249,6 +256,27 @@ If you set the trajectory to false, it indicates that you have some other means 
 ## Step 3 : Online tracking (not available yet)
 
 You are welcome to look at the code, but it doesn't work yet.
+
+# Notes
+
+Although we know how to extract the base station correction parameters, we don't yet know the model for the calibration. For this the code does not yet correct for lighthouse errors. If you believe that you have the correct model, set the parameter 'correct' to 'true' in your YAML profile and update the ```Predict(...)``` function in 'deepdive.hh':
+
+```c++
+// Given a point in space, predict the lighthouse angle
+template <typename T>
+static void Predict(T const* params, T const* xyz, T* ang, bool correct) {
+  if (correct) {
+    ang[0] = atan2(xyz[0] - (params[0*NUM_PARAMS + PARAM_TILT] + params[0*NUM_PARAMS + PARAM_CURVE] * xyz[1]) * xyz[1], xyz[2]);
+    ang[1] = atan2(xyz[1] - (params[1*NUM_PARAMS + PARAM_TILT] + params[1*NUM_PARAMS + PARAM_CURVE] * xyz[0]) * xyz[0], xyz[2]);
+    ang[0] -= params[0*NUM_PARAMS + PARAM_PHASE] + params[0*NUM_PARAMS + PARAM_GIB_MAG] * sin(ang[0] + params[0*NUM_PARAMS + PARAM_GIB_PHASE]);
+    ang[1] -= params[1*NUM_PARAMS + PARAM_PHASE] + params[1*NUM_PARAMS + PARAM_GIB_MAG] * sin(ang[1] + params[1*NUM_PARAMS + PARAM_GIB_PHASE]);
+  } else {
+    ang[0] = atan2(xyz[0], xyz[2]);
+    ang[1] = atan2(xyz[1], xyz[2]);
+  }
+}
+```
+
 
 # Copying (MIT licence)
 

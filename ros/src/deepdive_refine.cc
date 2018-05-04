@@ -801,7 +801,7 @@ int main(int argc, char **argv) {
   if (!nh.getParam("offline", offline_))
     ROS_FATAL("Failed to get if we are running in offline mode.");
   if (offline_) {
-    ROS_INFO("We are in offline mode. Speeding up bag replay.");
+    ROS_INFO("We are in offline mode. Speed-up is possible.");
     recording_ = true;
   }
 

@@ -368,7 +368,7 @@ bool Solve() {
     if (Kabsch<double>(pti, ptj, A, false))
       ROS_INFO_STREAM("- Solution " << A.translation().norm());
     else
-      ROS_INFO("- Solution not found");
+      ROS_INFO("- No correspondences so vive -> world frame is identity");
     // Write the solution
     wTv_[0] = A.translation()[0];
     wTv_[1] = A.translation()[1];
@@ -609,7 +609,7 @@ int main(int argc, char **argv) {
   if (!nh.getParam("offline", offline_))
     ROS_FATAL("Failed to get if we are running in offline mode.");
   if (offline_) {
-    ROS_INFO("We are in offline mode. Speeding up bag replay by 10x");
+    ROS_INFO("We are in offline mode. Speed-up is possible.");
     recording_ = true;
   }
 

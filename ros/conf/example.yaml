@@ -35,7 +35,7 @@ thresholds:
 visualize:          true
 
 # Apply light corrections broadcast over OOTX
-correct:            true
+correct:            false
 
 # List of lighthouses to be included in tracking
 lighthouses:
@@ -56,7 +56,7 @@ tracker_test:
   extrinsics:      [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
 
 # Registration and calibration bundle resolution
-resolution:         0.2
+resolution:         0.1
 
 # CALIBRATION OPTIONS
 
@@ -73,12 +73,12 @@ smoothing:          1.0
 
 # What else to refine, besides the trajectory
 refine:
-  trajectory:       false      # If false, corrections will be used (cheating)
+  trajectory:       true       # If false, corrections will be used (cheating)
   registration:     false      # Refine vive -> world transform
-  lighthouses:      true       # Refine lighthouse -> vive transform
-  extrinsics:       true       # If false tracker frame is the body frame
+  lighthouses:      false      # Refine lighthouse -> vive transform
+  extrinsics:       false      # If false tracker frame is the body frame
   sensors:          false      # Refine sensor positions
-  params:           true       # Refine lighthouse parameters
+  params:           false      # Refine lighthouse parameters
   head:             false      # Refine head transform
 
 # These are the parameters used by the non-linear least squares optimizer
