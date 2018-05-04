@@ -1,6 +1,8 @@
+# libdeepdive - A driver for rigid body tracking with HTC Vive trackers
+
 <p>
 <img src="doc/tracker.png" srcset="../images/tracker.png 1x" title="libdeepdive" align="right" style="display: inline"/>
-This is an unofficial driver for the HTC Vive tracking system, split into two major components -- a C-based low level driver for connecting to and extracting light and IMU measurements from trackers, and a ROS/C++ high-level driver for working with the raw measurements. Note that this code is not production ready or even working fully, only supports HTC trackers -- not HMDs or controllers -- and has only been tested on on Ubuntu.
+This is an unofficial ROS driver for the HTC Vive tracking system, which is split into two major components: (1) a  low level C-based driver for connecting to and extracting light and IMU measurements from trackers, and (b) a high-level ROS/C++  driver for working with the raw measurements. Note that this code is not production ready or even working fully, and has only been tested on on Ubuntu Linux.
 </p>
 
 # Preparing your system
