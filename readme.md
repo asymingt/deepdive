@@ -117,12 +117,11 @@ Where the transforms are defined as the following:
     bTh = head (bolt) to body frame [extrinsic calibration]
     hTl = light to head frame [read from JSON]
 
-Similarly, 
+Similarly, IMU measurements can be reprojected into the body frame using this transform ```bTi = bTh hTi``` being careful to account for centripetal forces.
 
-    y = wTb bTh hTi x
+Where the transforms are defined as the following:
 
-Where 
-
+    bTh = head (bolt) to body frame [extrinsic calibration]
     hTi = IMU to head frame [read from JSON]
 
 There are three components to the high-level driver
