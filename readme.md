@@ -21,7 +21,7 @@ First, make sure you add the udev rules, otherwise you won't have read access to
     SUBSYSTEM=="usb", ATTRS{idVendor}=="114d", ATTRS{idProduct}=="8200", TAG+="uaccess"
     SUBSYSTEM=="usb", ATTRS{idVendor}=="114d", ATTRS{idProduct}=="8a12", TAG+="uaccess"
 
-Note that if you are working in a VM then you might wish to
+Note that if you are working in a VM then you might need to configure the VM host to automatically attach USB HID devices to the guest.
 
 You will then need to install SteamVR to pair the trackers with their wireless USB adapters. If you don't have a HMD then you might need to add one or two lines to your SteamVR configuration so that you can run SteamVR without a HMD. I'm not going to cover how to pair the devices; suffice it to say that if you see a green light then you are paired correctly.
 
