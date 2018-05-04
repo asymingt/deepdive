@@ -236,7 +236,7 @@ Each line is a transform of the form ```[x y z qx qy qz qw parent child]```. You
 
 The calibration launch file opens rviz by default using a config file unique to the profile. The calibration code writes trajectories to topics with a pattern ```/path/%name%/%lighthouse%``` with sufficient work you should be able to get something looking like this:
 
-[calibration](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/calibration.png)
+![calibration](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/calibration.png)
 
 ## Step 3 : Offline tracking
 
@@ -262,7 +262,7 @@ If you set the trajectory to false, it indicates that you have some other means 
 
 The refine launch file opens rviz by default using a config file unique to the profile. The calibration code writes the body trajectories to ```/path``` with sufficient work you should be able to get something looking like this:
 
-[refine](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/refine.png)
+![refine](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/refine.png)
 
 ## Step 3 : Online tracking (not available yet)
 
