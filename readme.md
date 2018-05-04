@@ -91,7 +91,7 @@ Now, source the compiled products:
 
 You are now ready to use the high-level driver.
 
-# Overview the high-level driver
+# Conceptual overview
 
 The high-level driver supports the notion of profiles through YAML configuration files. This allows one to save configuration bundles for different experimental contexts, and easily switch between them. Crucially, a profile describes a rigid body. All trackers listed in the profile are assumed to be rigidly attached to the rigid body being tracked,
 
