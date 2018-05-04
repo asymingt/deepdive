@@ -1,4 +1,4 @@
-# libdeepdive - A driver for rigid body tracking with HTC Vive trackers
+# libdeepdive - Rigid body tracking with HTC Vive trackers
 
 <p>
 <img src="doc/tracker.png" srcset="../images/tracker.png 1x" title="libdeepdive" align="right" style="display: inline"/>
