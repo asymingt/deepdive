@@ -468,13 +468,39 @@ bool Solve() {
     if (!refine_registration_)
       problem.SetParameterBlockConstant(wTv_);
 
-
-
     // If we have a fixed the height use the mean height estimate
     if (force2d_) {
       std::map<ros::Time, double[6]>::iterator it;
       for (it = wTb.begin(); it != wTb.end(); it++)
         it->second[2] = height.Mean();
+    }
+
+    // Lighthouse after solving
+    {
+      LighthouseMap::iterator lt;
+      for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+        ROS_INFO_STREAM("Lighthouse BEFORE solving: " << lt->first);
+        ROS_INFO_STREAM("- px: " << lt->second.vTl[0]);
+        ROS_INFO_STREAM("- py: " << lt->second.vTl[1]);
+        ROS_INFO_STREAM("- pz: " << lt->second.vTl[2]);
+        ROS_INFO_STREAM("- rx: " << lt->second.vTl[3]);
+        ROS_INFO_STREAM("- ry: " << lt->second.vTl[4]);
+        ROS_INFO_STREAM("- rz: " << lt->second.vTl[5]);
+      }
+    }
+
+    // Extrinsocs before solving
+    {
+      TrackerMap::iterator tt;
+      for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+        ROS_INFO_STREAM("Extrinsics BEFORE solving: " << tt->first);
+        ROS_INFO_STREAM("- px: " << tt->second.bTh[0]);
+        ROS_INFO_STREAM("- py: " << tt->second.bTh[1]);
+        ROS_INFO_STREAM("- pz: " << tt->second.bTh[2]);
+        ROS_INFO_STREAM("- rx: " << tt->second.bTh[3]);
+        ROS_INFO_STREAM("- ry: " << tt->second.bTh[4]);
+        ROS_INFO_STREAM("- rz: " << tt->second.bTh[5]);
+      }
     }
 
     // Parameters before solving
@@ -580,6 +606,34 @@ bool Solve() {
     } else {
       ROS_WARN("Solution is not usable.");
       return false;
+    }
+  }
+
+  // Lighthouse after solving
+  {
+    LighthouseMap::iterator lt;
+    for (lt = lighthouses_.begin(); lt != lighthouses_.end(); lt++) {
+      ROS_INFO_STREAM("Lighthouse AFTER solving: " << lt->first);
+      ROS_INFO_STREAM("- px: " << lt->second.vTl[0]);
+      ROS_INFO_STREAM("- py: " << lt->second.vTl[1]);
+      ROS_INFO_STREAM("- pz: " << lt->second.vTl[2]);
+      ROS_INFO_STREAM("- rx: " << lt->second.vTl[3]);
+      ROS_INFO_STREAM("- ry: " << lt->second.vTl[4]);
+      ROS_INFO_STREAM("- rz: " << lt->second.vTl[5]);
+    }
+  }
+
+  // Extrinsics after solving
+  {
+    TrackerMap::iterator tt;
+    for (tt = trackers_.begin(); tt != trackers_.end(); tt++) {
+      ROS_INFO_STREAM("Extrinsics AFTER solving: " << tt->first);
+      ROS_INFO_STREAM("- px: " << tt->second.bTh[0]);
+      ROS_INFO_STREAM("- py: " << tt->second.bTh[1]);
+      ROS_INFO_STREAM("- pz: " << tt->second.bTh[2]);
+      ROS_INFO_STREAM("- rx: " << tt->second.bTh[3]);
+      ROS_INFO_STREAM("- ry: " << tt->second.bTh[4]);
+      ROS_INFO_STREAM("- rz: " << tt->second.bTh[5]);
     }
   }
 

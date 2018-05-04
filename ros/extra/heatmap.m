@@ -14,19 +14,20 @@ ootx(2).gib_mag = -0.00743484;
 ootx(2).curve = 0.00172043;
 
 % AFTER
-ootx(3).phase = 0.0282381;
-ootx(3).tilt = 0.0156368;
-ootx(3).gib_phase = 2.1669;
-ootx(3).gib_mag = 0.0389253;
-ootx(3).curve = 0.0080333;
-ootx(4).phase = 0.0701366;
-ootx(4).tilt = 0.0281246;
-ootx(4).gib_phase = 0.071969;
-ootx(4).gib_mag = -0.142944;
-ootx(4).curve = -0.0151812;
+ootx(3).phase = -0.0867857;
+ootx(3).tilt = 0.127538;
+ootx(3).gib_phase = 1.91645;
+ootx(3).gib_mag = 0.0411464;
+ootx(3).curve = 0.0519228;
+ootx(4).phase = 0.198872;
+ootx(4).tilt = 0.0124835;
+ootx(4).gib_phase = -1.23938;
+ootx(4).gib_mag = 0.326461;
+ootx(4).curve = -0.00920232;
 
 # Print the map
 n = 64;
+s = [-0.2 0.2];
 Xa = zeros(n, n);
 Ya = zeros(n, n);
 Xb = zeros(n, n);
@@ -40,43 +41,40 @@ for i = 1:n
     x = tan(ideal(1));
     y = tan(ideal(2));
     z = 1.0;
-    % Perturb the AFTER measurement to derive a reference
+    % REFERENCE
     Xa(i, j) = atan2(x - (ootx(3).tilt + ootx(3).curve * y) * y, z);
     Ya(i, j) = atan2(y - (ootx(4).tilt + ootx(4).curve * x) * x, z);
     Xa(i, j) = Xa(i, j) - ootx(3).phase - ootx(3).gib_mag * sin(Xa(i, j) + ootx(3).gib_phase);
     Ya(i, j) = Ya(i, j) - ootx(4).phase - ootx(4).gib_mag * sin(Ya(i, j) + ootx(4).gib_phase);
     Xa(i, j) = Xa(i, j) - ideal(1);
     Ya(i, j) = Ya(i, j) - ideal(2);
-    % Perturb the BEFORE measurement
-    Xb(i, j) = ideal(1) - ootx(1).phase - ootx(1).gib_mag * sin(ideal(1) + ootx(1).gib_phase);
-    Yb(i, j) = ideal(2) - ootx(2).phase - ootx(2).gib_mag * sin(ideal(2) + ootx(2).gib_phase);
-    x = tan(Xb(i, j));
-    y = tan(Yb(i, j));
-    z = 1.0;
-    Xb(i, j) = atan2(x + (ootx(1).tilt + ootx(1).curve * y) * y, z);
-    Yb(i, j) = atan2(y + (ootx(2).tilt + ootx(2).curve * x) * x, z);
+    
+    % ESTIMATE
+    Xb(i, j) = atan2(x - ootx(1).tilt * y + ootx(1).curve * (y * y * y * y), z);
+    Yb(i, j) = atan2(y - ootx(2).tilt * x + ootx(2).curve * (x * x * x * x), z);
+    Xb(i, j) = Xb(i, j) - ootx(1).phase - ootx(1).gib_mag * sin(Xb(i, j) + ootx(1).gib_phase);
+    Yb(i, j) = Yb(i, j) - ootx(2).phase - ootx(2).gib_mag * sin(Yb(i, j) + ootx(2).gib_phase);
     Xb(i, j) = Xb(i, j) - ideal(1);
     Yb(i, j) = Yb(i, j) - ideal(2);
-
   endfor
 endfor
 subplot(2, 2, 1);
-imagesc(Xb);
+imagesc(Xb, s);
 axis equal;
 colorbar;
-title('AXIS 0 BEFORE');
+title('AXIS 0 ESTIMATE');
 subplot(2, 2, 2);
-imagesc(Yb);
+imagesc(Yb, s);
 axis equal;
 colorbar;
-title('AXIS 1 BEFORE');
+title('AXIS 1 ESTIMATE');
 subplot(2, 2, 3);
-imagesc(Xa);
+imagesc(Xa, s);
 axis equal;
 colorbar;
-title('AXIS 0 AFTER');
+title('AXIS 0 REFERENCE');
 subplot(2, 2, 4);
-imagesc(Ya);
+imagesc(Ya, s);
 axis equal;
 colorbar;
-title('AXIS 1 AFTER');
+title('AXIS 1 REFRENCE');
