@@ -36,8 +36,8 @@
 #include <deepdive.h>
 
 // Enable X and Y axis
-int enx_ = 0;
-int eny_ = 0;
+int en0_ = 0;
+int en1_ = 0;
 
 // Callback to display light info
 void my_light_process(struct Tracker * tracker, struct Lighthouse * lighthouse,
@@ -45,8 +45,8 @@ void my_light_process(struct Tracker * tracker, struct Lighthouse * lighthouse,
     uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths) {
   static float angcnv, lencnv;
   // Enable X and Y
-  if (axis == 0 && eny_ == 0) return;
-  if (axis == 1 && enx_ == 0) return;
+  if (axis == 0 && en0_ == 0) return;
+  if (axis == 1 && en1_ == 0) return;
   // Print header info
   printf("[%u] # %s LH %s %s\n", synctime, tracker->serial, lighthouse->serial,
     (axis == MOTOR_AXIS0 ? "AXIS 0" : "AXIS 1"));
@@ -165,14 +165,14 @@ void my_lighthouse_process(struct Lighthouse *l) {
 int main(int argc, char **argv) {
   // Get commandline arguments
   struct arg_lit  *imu     = arg_lit0("i", "imu", "print imu");
-  struct arg_lit  *lx      = arg_lit0("x", "lightx", "print rotation about LH X");
-  struct arg_lit  *ly      = arg_lit0("y", "lighty", "print rotation about LH Y");
+  struct arg_lit  *l0      = arg_lit0("0", "ax0", "print rotation about LH AXIS 0");
+  struct arg_lit  *l1      = arg_lit0("1", "ax1", "print rotation about LH AXIS 1");
   struct arg_lit  *button  = arg_lit0("b", "button", "print buttons");
-  struct arg_lit  *lh      = arg_lit0("h", "lh", "print lighthouse info");
+  struct arg_lit  *lh      = arg_lit0("l", "lh", "print lighthouse info");
   struct arg_lit  *tracker = arg_lit0("t", "tracker", "print tracker info");
   struct arg_lit  *help    = arg_lit0(NULL, "help", "print this help and exit");
   struct arg_end  *end     = arg_end(20);
-  void* argtable[] = {imu, lx, ly, button, tracker, lh, help, end};
+  void* argtable[] = {imu, l0, l1, button, tracker, lh, help, end};
   // Verify we allocated correcty
   const char* progname = "deepdive_tool";
   int nerrors, exitcode = 0;
@@ -208,12 +208,12 @@ int main(int argc, char **argv) {
     goto exit;
   }
   // Limit to X or Y
-  enx_ = lx->count;
-  eny_ = ly->count;
+  en0_ = l0->count;
+  en1_ = l1->count;
   // Install callbacks
   if (imu->count > 0)
     deepdive_install_imu_fn(drv, my_imu_process);
-  if (lx->count + ly->count > 0)
+  if (l0->count + l1->count > 0)
     deepdive_install_light_fn(drv, my_light_process);
   if (button->count > 0)
     deepdive_install_button_fn(drv, my_button_process);

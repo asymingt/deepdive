@@ -32,7 +32,7 @@ You will then need to install SteamVR to pair the trackers with their wireless U
 
 The low-level driver can in theory bind to an arbitrary number of trackers, directly over USB or through a USB wireless adapter (also referred to as a Watchman dongle). To compile the driver you will need a few things:
 
-    sudo apt install build-essential libjson-c-dev zlib1g-dev libusb-1.0-0-dev git cmake
+    sudo apt install build-essential libargtable2-dev libjson-c-dev zlib1g-dev libusb-1.0-0-dev git cmake
 
 Now checkout and build the code in a directory of your choice
 
@@ -46,19 +46,19 @@ Now checkout and build the code in a directory of your choice
 
 You should now be able to use the deepdive_tool to probe your devices. 
 
-    Usage: deepdive_tool [-i01bth] [--help]
+    Usage: deepdive_tool [-i01btl] [--help]
     This program extracts and prints data from a vive system.
       -i, --imu                 print imu
-      -0, --axis0               print rotation about LH 0
-      -1, --axis1               print rotation about LH 1
+      -0, --ax0                 print rotation about LH AXIS 0
+      -1, --ax1                 print rotation about LH AXIS 1
       -b, --button              print buttons
       -t, --tracker             print tracker info
-      -h, --lh                  print lighthouse info
+      -l, --lh                  print lighthouse info
       --help                    print this help and exit
 
 Note that deepdive does not begin streaming any lights data until a complete OOTX packet is received from a lighthouse. This is because the light cannot be corrected until the base station parameters are known. Try:
 
-    deepdive_tool -h
+    deepdive_tool -l
 
 
 # Installing the high-level ROS/C++ driver
@@ -143,7 +143,7 @@ There are three components to the high-level driver
 
 First, you'll need to know a bit about your hardware. You can use deepdive_tool with the -h switch to get information about your tracker and lighthouses:
 
-    deepdive_tool -h
+    deepdive_tool -l
     Read calibration data for tracker LHR-08DE963B
     Found watchman LHR-08DE963B
     Metadata received for lighthouse with serial  3097796425
