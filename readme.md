@@ -1,7 +1,7 @@
-# Overview
-
+<p>
+<img src="doc/tracker.png" srcset="../images/tracker.png 1x" title="libdeepdive" align="right" style="display: inline"/>
 This is an unofficial driver for the HTC Vive tracking system, split into two major components -- a C-based low level driver for connecting to and extracting light and IMU measurements from trackers, and a ROS/C++ high-level driver for working with the raw measurements. Note that this code is not production ready or even working fully, only supports HTC trackers -- not HMDs or controllers -- and has only been tested on on Ubuntu.
-
+</p>
 # Preparing your system
 
 First, make sure you add the udev rules, otherwise you won't have read access to the HID devices created when you plug in a tracker.
