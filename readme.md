@@ -234,6 +234,10 @@ If you collected some data and the calibration algorithm completed successfully,
 
 Each line is a transform of the form ```[x y z qx qy qz qw parent child]```. You might notice that some of the parent and child frames match the serial numbers of your hardware. You might also notice that the first lighthouse always has the identity transform to the vive frame; this is by design.
 
+The calibration launch file opens rviz by default using a config file unique to the profile. The calibration code writes trajectories to topics with a pattern ```/path/%name%/%lighthouse%``` with sufficient work you should be able to get something looking like this:
+
+[calibration](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/calibration.png)
+
 ## Step 3 : Offline tracking
 
 In many cases experimental scenarios it is OK to simply solve for the trajectory after the experiment is complete. This is useful if, for example, you wish to get a trace of how the rigid body moved or benchmark another localization system's performance.
@@ -254,7 +258,11 @@ By default, only the rigid body trajectory (wTb) is solved for, while everything
       params:           false      # Refine lighthouse calibration parameters
       head:             false      # Refine head transform
 
-If you set the trajectory to false, it indicates that you have some other means of tracking the body frame (Vicon, etc). The refine code will look at TF2 for this data. Specifically, it will look for world -> body transforms being spat out by the other system. This is probably only useful to people who are tying to solve for lighthouse calibration parameters.
+If you set the trajectory to false, it indicates that you have some other means of tracking the body frame (Vicon, etc). The refine code will look at TF2 for this data. Specifically, it will look for world -> body transforms being spat out by the other system. This is probably only useful to people who are trying to solve for lighthouse calibration parameters.
+
+The refine launch file opens rviz by default using a config file unique to the profile. The calibration code writes the body trajectories to ```/path``` with sufficient work you should be able to get something looking like this:
+
+[refine](https://raw.githubusercontent.com/asymingt/libdeepdive/master/doc/refine.png)
 
 ## Step 3 : Online tracking (not available yet)
 
