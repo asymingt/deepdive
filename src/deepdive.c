@@ -42,8 +42,8 @@ struct Driver * deepdive_init() {
   struct Driver *drv = malloc(sizeof(struct Driver));
   if (drv == NULL)
     return NULL;
-  // We haven't yet pushed the data
-  drv->pushed = 0;
+  // Make sure we are zeroed by default
+  memset(drv, 0, sizeof(struct Driver));
   // General constants
   drv->general.timebase_hz            = 48000000UL; // Ticks per second
   drv->general.timecenter_ticks       = 200000UL;   // Midpoint of sweep
@@ -65,7 +65,7 @@ struct Driver * deepdive_init() {
 // CALLBACKS
 
 // Register a light callback function
-void deepdive_install_lig_fn(struct Driver * drv,  lig_func fbp) {
+void deepdive_install_light_fn(struct Driver * drv,  lig_func fbp) {
   if (drv == NULL) return;
   if (fbp) drv->lig_fn = fbp;
 }
@@ -77,7 +77,7 @@ void deepdive_install_imu_fn(struct Driver * drv,  imu_func fbp) {
 }
 
 // Register an button callback function
-void deepdive_install_but_fn(struct Driver * drv, but_func fbp) {
+void deepdive_install_button_fn(struct Driver * drv, but_func fbp) {
   if (drv == NULL) return;
   if (fbp) drv->but_fn = fbp;
 }
@@ -92,12 +92,6 @@ void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp) {
 void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp) {
   if (drv == NULL) return;
   if (fbp) drv->lighthouse_fn = fbp;
-}
-
-// Register an button callback function
-void deepdive_install_general_fn(struct Driver * drv, general_func fbp) {
-  if (drv == NULL) return;
-  if (fbp) drv->general_fn = fbp;
 }
 
 // GETTERS
@@ -133,9 +127,9 @@ int deepdive_poll(struct Driver * drv) {
   if (drv == NULL) return -1;
   // Push general and tracker config
   if (drv->pushed == 0) {
-    if (drv->general_fn) drv->general_fn(&drv->general);
-    for (uint16_t i = 0; i < drv->num_trackers; i++)
-      if (drv->tracker_fn) drv->tracker_fn(drv->trackers[i]);
+    for (size_t i = 0; i < drv->num_trackers; i++)
+      if (drv->tracker_fn)
+        drv->tracker_fn(drv->trackers[i]);
     drv->pushed = 1;
   }
   // Handle any USB events
@@ -149,7 +143,6 @@ void deepdive_close(struct Driver * drv) {
     libusb_close(drv->trackers[i]->udev);
     free(drv->trackers[i]);
   }
-  free(drv->trackers);
   libusb_exit(drv->usb);
   free(drv);
 }

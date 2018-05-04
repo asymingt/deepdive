@@ -1,0 +1,160 @@
+# CALIBRATION PARAMETERS
+#
+# The calibration node is responsible for estimating and maintaining the
+# fixed transforms from the world to lighthouse, and from the set of
+# rigidly connected trackers to what we consider to be the body frame. It
+# does so by framing the localization problem as least-square error
+# minimization over a connected graph
+#
+# Our approach uses only light measurements and pose corrections to solve
+# for the lighthouse positions in the world frame and the transforms of
+# the trackers (mechanical frame) with respect to the body frame..
+#
+# If the calibration procedure works as expected, we'll have a set of
+# lighthouse -> world and tracker -> tracker/body transforms. We'll then
+# write these to a calibration file, which is written to the default ROS
+# working directory (~/.ros) and persisted across restarts.
+
+# GENERAL OPTIONS
+
+# Parent frame is the "world" frame, and child frame is typically "truth",
+# and estimate is usally "body"
+frames:
+  world:            "world"
+  vive:             "vive"
+  truth:            "truth"
+  body:             "body"
+
+# Thresholds used to reject measurements
+thresholds:
+  count:            1          # Min pulses/sweep to add to solver
+  angle:            60.0       # Threshold on angle (in degres)
+  duration:         1.00       # Threshold on duration (in microsecs)
+
+# Publish rviz markers for the sensors
+visualize:          true
+
+# Apply light corrections broadcast over OOTX
+correct:            false
+
+# List of lighthouses to be included in tracking
+lighthouses:
+  - "lighthouse_left"
+  - "lighthouse_right"
+lighthouse_left:
+  serial:          "3097796425"
+  transform:       [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+lighthouse_right:
+  serial:          "907388239"
+  transform:       [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+
+# List of trackers to be included in tracking (see blocks below)
+trackers:
+  - "tracker_test"
+tracker_test:
+  serial:          "LHR-08DE963B"
+  extrinsics:      [0.000, 0.000, 0.000, 0.000, 0.000, 0.000, 1.000]
+
+# Registration and calibration bundle resolution
+resolution:         0.1
+
+# CALIBRATION OPTIONS
+
+# Tracker centroid to world offset
+offset:             [0.0, 0.0, -0.200]
+
+# REGISTRATION OPTIONS
+
+# Force z, roll and pitch to be constant when solving
+force2d:            false
+
+# Smoothing factor
+smoothing:          1.0
+
+# What else to refine, besides the trajectory
+refine:
+  trajectory:       true       # If false, corrections will be used (cheating)
+  registration:     false      # Refine vive -> world transform
+  lighthouses:      false      # Refine lighthouse -> vive transform
+  extrinsics:       false      # If false tracker frame is the body frame
+  sensors:          false      # Refine sensor positions
+  params:           false      # Refine lighthouse parameters
+  head:             false      # Refine head transform
+
+# These are the parameters used by the non-linear least squares optimizer
+solver:
+  max_time:         30.0       # In seconds
+  max_iterations:   100        # Number of iterations
+  threads:          4          # Number of threads
+  debug:            true       # Provide debug output?
+
+# TRACKER OPTIONS
+
+# Topics for publishing data
+topics:
+  pose:             "/loc/truth/pose"     # Topic for publishing pose
+  twist:            "/loc/truth/twist"    # Topic for publishing twist
+
+# For the tracking filter
+
+# Fixed tracking rate
+rate:               62.5
+
+# Gravity vector in world frame
+gravity:            [0.0, 0.0, 9.80665]
+
+# Which measurements to use
+use:
+  gyroscope:        false
+  accelerometer:    false
+  light:            true
+
+# Initial state value
+initial_estimate:
+  position:         [0, 0, 0]
+  attitude:         [0, 0, 0, 1]
+  velocity:         [0, 0, 0]
+  omega:            [0, 0, 0]
+  acceleration:     [0, 0, 0]
+  alpha:            [0, 0, 0]
+
+#  Initial uncertainty
+initial_cov:
+  position:         [10, 10, 10]
+  attitude:         [10, 10, 10]
+  velocity:         [1.0e-20, 1.0e-20, 1.0e-20]
+  omega:            [1.0e-20, 1.0e-20, 1.0e-20]
+  acceleration:     [1.0e-20, 1.0e-20, 1.0e-20]
+  alpha:            [1.0e-20, 1.0e-20, 1.0e-20]
+
+# Process noise
+process_noise_cov:
+  position:         [1.0e-06, 1.0e-06, 1.0e-06]
+  attitude:         [1.0e-06, 1.0e-06, 1.0e-06]
+  velocity:         [1.0e-06, 1.0e-06, 1.0e-06]
+  omega:            [1.0e-06, 1.0e-06, 1.0e-06]
+  acceleration:     [1.0e-06, 1.0e-06, 1.0e-06]
+  alpha:            [1.0e-06, 1.0e-06, 1.0e-06]
+
+#  Initial uncertainty
+imu_initial_cov:
+  acc_scale:        [1.0e-20, 1.0e-20, 1.0e-20]
+  acc_bias:         [1.0e-20, 1.0e-20, 1.0e-20]
+  gyr_scale:        [1.0e-20, 1.0e-20, 1.0e-20]
+  gyr_bias:         [1.0e-04, 1.0e-04, 1.0e-04]
+
+# Process noise
+imu_process_noise_cov:
+  acc_scale:        [0, 0, 0]
+  acc_bias:         [0, 0, 0]
+  gyr_scale:        [0, 0, 0]
+  gyr_bias:         [2.4e-10, 2.4e-10, 2.4e-10]
+
+# For measurements
+
+measurement_cov:
+  accelerometer:    [1.0e-4, 1.0e-4, 1.0e-4]
+  gyroscope:        [1.0e-6, 1.0e-6, 1.0e-6]
+  angle:            1.0e-8
+
+# END OF CONFIGURATION

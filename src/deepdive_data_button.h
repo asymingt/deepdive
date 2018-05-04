@@ -38,6 +38,6 @@
 
 // Process button data
 void deepdive_data_button(struct Tracker * tracker,
-  uint32_t timecode, uint8_t mask);
+  uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical);
 
 #endif

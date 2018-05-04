@@ -44,4 +44,8 @@ void deepdive_dev_tracker_light(struct Tracker * tracker,
 void deepdive_dev_tracker_imu(struct Tracker * tracker,
   const uint8_t *buf, int32_t len);
 
+// Process button data
+void deepdive_dev_tracker_button(struct Tracker * tracker,
+  const uint8_t *buf, int32_t len);
+
 #endif

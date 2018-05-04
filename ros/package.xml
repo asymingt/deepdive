@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>deepdive_ros</name>
+  <version>0.0.1</version>
+  <description>High-level Vive Driver</description>
+  <author email="andrew.c.symington@gmail.com">Andrew Symington</author>
+  <maintainer email="andrew.c.symington@gmail.com">Andrew Symington</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>catkin_simple</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <build_export_depend>message_runtime</build_export_depend>
+  <exec_depend>message_runtime</exec_depend>
+  <depend>roscpp</depend>
+  <depend>tf2_ros</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+</package>

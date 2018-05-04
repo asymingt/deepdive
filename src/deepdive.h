@@ -42,26 +42,24 @@
 #include <stdint.h>
 #include <string.h>
 
-// Uncomment the line below if you want the IMU in the tracker
-// frame (this might affect scale and bias parameters). By
-// default we keep this in the IMU frame.
-// #define IMU_FRAME_TRACKER
-
 #define MAX_PACKET_LEN        64
 #define PREAMBLE_LENGTH       17
 
 #define MAX_NUM_LIGHTHOUSES   2
+#define MAX_NUM_TRACKERS      128
 #define MAX_NUM_SENSORS       32
 #define MAX_SERIAL_LENGTH     32
 #define USB_INT_BUFF_LENGTH   64
 
 #define USB_VEND_HTC          0x28de
 #define USB_PROD_TRACKER      0x2022
+#define USB_PROD_CONTROLLER   0x2012
 #define USB_PROD_WATCHMAN     0x2101
 
 #define USB_ENDPOINT_GENERAL  0x81
 #define USB_ENDPOINT_LIGHT    0x82
-#define MAX_ENDPOINTS         2
+#define USB_ENDPOINT_BUTTONS  0x83
+#define MAX_ENDPOINTS         3
 
 #define DEFAULT_ACC_SCALE     (float)(9.80665/4096.0)
 #define DEFAULT_GYR_SCALE     (float)((1./32.768)*(3.14159/180.));
@@ -72,10 +70,21 @@ struct Tracker;
 
 // Extrinsics axes
 typedef enum {
-  TRACKER_IMU   = 0,
-  TRACKER_LIGHT = 1,
-  WATCHMAN      = 2
+  TRACKER_IMU       = 0,
+  TRACKER_LIGHT     = 1,
+  TRACKER_BUTTONS   = 2,
+  WATCHMAN          = 3,
+  WATCHMAN_BUTTONS  = 4
 } CallbackType;
+
+// Button types
+typedef enum {
+  BUTTON_TRIGGER    = (1<<8),
+  BUTTON_GRIP       = (1<<10),
+  BUTTON_MENU       = (1<<20),
+  BUTTON_PAD_CLICK  = (1<<26),
+  BUTTON_PAD_TOUCH  = (1<<28)
+} ButtonType;
 
 // Interrupt buffer for an endpoint
 struct Endpoint {
@@ -96,6 +105,9 @@ struct Calibration {
   float acc_scale[3];                       // Accelerometer scale
   float gyr_bias[3];                        // Gyro bias
   float gyr_scale[3];                       // Gyro scale
+  // Transforms below are (wx, qy, qz, qw, X, Y, Z)
+  float imu_transform[7];                   // Tracker -> IMU trasform
+  float head_transform[7];                  // Tracker -> Head transform
 };
 
 typedef struct {
@@ -159,9 +171,9 @@ struct Tracker {
 
 // Motor information
 typedef enum {
-  MOTOR_VERTICAL   = 0,
-  MOTOR_HORIZONTAL = 1,
-  MAX_NUM_MOTORS   = 2
+  MOTOR_AXIS0 = 0,
+  MOTOR_AXIS1 = 1,
+  MAX_NUM_MOTORS = 2
 } MotorType;
 
 /* Phase is indeed an offset correction to bearing angles from
@@ -214,23 +226,21 @@ typedef void (*lig_func)(struct Tracker * tracker, struct Lighthouse * lighthous
   uint16_t *sensors,  uint32_t *sweeptimes, uint32_t *angles, uint16_t *lengths);
 typedef void (*imu_func)(struct Tracker * tracker, uint32_t timecode,
   int16_t acc[3], int16_t gyr[3], int16_t mag[3]);
-typedef void (*but_func)(struct Tracker * tracker, uint32_t timecode,
-  uint8_t mask);
+typedef void (*but_func)(struct Tracker * tracker,
+  uint32_t mask, uint16_t trigger, int16_t horizontal, int16_t vertical);
 typedef void (*tracker_func)(struct Tracker * tracker);
 typedef void (*lighthouse_func)(struct Lighthouse * lighthouse);
-typedef void (*general_func)(struct General * general);
 
 // Driver context
 struct Driver {
   struct libusb_context* usb;
   uint16_t num_trackers;
-  struct Tracker **trackers;
+  struct Tracker *trackers[MAX_NUM_TRACKERS];
   lig_func lig_fn;               // Called when new light data arrives
   imu_func imu_fn;               // Called when new IMU data arrives
   but_func but_fn;               // Called when new button data arrives
   tracker_func tracker_fn;       // Called when tracker cal info is ready
   lighthouse_func lighthouse_fn; // Called when lighthouse cal info is ready
-  general_func general_fn;       // Called when general cal info is ready
   struct Lighthouse lighthouses[MAX_NUM_LIGHTHOUSES];
   struct General general;        // General configuration
   uint8_t pushed;                // Have we pushed thie tracker/general config
@@ -240,22 +250,19 @@ struct Driver {
 struct Driver * deepdive_init();
 
 // Register a light callback function
-void deepdive_install_lig_fn(struct Driver * drv, lig_func fbp);
+void deepdive_install_light_fn(struct Driver * drv, lig_func fbp);
 
 // Register an IMU callback function
 void deepdive_install_imu_fn(struct Driver * drv, imu_func fbp);
 
-// Register an button callback function
-void deepdive_install_but_fn(struct Driver * drv, but_func fbp);
+// Register a button callback function
+void deepdive_install_button_fn(struct Driver * drv, but_func fbp);
 
-// Register an button callback function
+// Register a tracker callback function
 void deepdive_install_tracker_fn(struct Driver * drv, tracker_func fbp);
 
-// Register an button callback function
+// Register a lighthouse callback function
 void deepdive_install_lighthouse_fn(struct Driver * drv, lighthouse_func fbp);
-
-// Register an button callback function
-void deepdive_install_general_fn(struct Driver * drv, general_func fbp);
 
 // Get the general configuration data
 struct General * deepdive_general(struct Driver * drv);

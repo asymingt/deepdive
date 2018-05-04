@@ -61,6 +61,9 @@ static void interrupt_handler(struct libusb_transfer* t) {
    case TRACKER_LIGHT:
     deepdive_dev_tracker_light(ep->tracker, ep->buffer, t->actual_length);
     break;
+   case TRACKER_BUTTONS:
+    deepdive_dev_tracker_button(ep->tracker, ep->buffer, t->actual_length);
+    break;
    case WATCHMAN:
     deepdive_dev_watchman(ep->tracker, ep->buffer, t->actual_length);
     break;
@@ -172,6 +175,12 @@ static int json_parse(struct Tracker * tracker, const char* data) {
   if (json_object_object_get_ex(jobj, "gyro_scale", &jtmp))
     if (!json_read_arr_dbl(jtmp, tracker->cal.gyr_scale, 3))
       printf("Could not read the JSON field: gyr_scale\n");
+  if (json_object_object_get_ex(jobj, "trackref_from_imu", &jtmp))
+    if (!json_read_arr_dbl(jtmp, tracker->cal.imu_transform, 7))
+      printf("Could not read the JSON field: trackref_from_imu\n");
+  if (json_object_object_get_ex(jobj, "trackref_from_head", &jtmp))
+    if (!json_read_arr_dbl(jtmp, tracker->cal.head_transform, 7))
+      printf("Could not read the JSON field: trackref_from_head\n");
   // Photodiode calibration parameters
   json_object *jlhc;
   if (json_object_object_get_ex(jobj, "lighthouse_config", &jlhc)) {
@@ -227,14 +236,14 @@ static int get_config(struct Tracker * tracker, int send_extra_magic) {
     }
     cfgbuffwide[0] = 0xff;
     ret = hid_get_feature_report_timeout(
-      tracker->udev, 0, cfgbuffwide, sizeof( cfgbuffwide ) );
+      tracker->udev, 0, cfgbuffwide, sizeof(cfgbuffwide));
     usleep(1000);
   }
   // Send Report 16 to prepare the device for reading config info
-  memset( cfgbuff, 0, sizeof( cfgbuff ) );
+  memset(cfgbuff, 0, sizeof(cfgbuff));
   cfgbuff[0] = 0x10;
   if((ret = hid_get_feature_report_timeout(
-    tracker->udev, 0, cfgbuff, sizeof( cfgbuff ) ) ) < 0 ) {
+    tracker->udev, 0, cfgbuff, sizeof(cfgbuff) ) ) < 0 ) {
     printf( "Could not get survive config data for device");
     return -1;
   }
@@ -316,6 +325,8 @@ int deepdive_usb_init(struct Driver * drv) {
     struct Tracker *tracker = malloc(sizeof(struct Tracker));
     if (!tracker)
       continue;
+    // Make sure the memory is zeroed
+    memset(tracker, 0, sizeof(struct Tracker));
     tracker->driver = drv;
 
     // Null the lighthouse pointer
@@ -344,10 +355,14 @@ int deepdive_usb_init(struct Driver * drv) {
 
     // What we do depends on the product
     switch (tracker->type) {
-     /////////////////
-     // USB TRACKER //
-     /////////////////
+     ///////////////////////////////
+     // USB TRACKER OR CONTROLLER //
+     ///////////////////////////////
+     default:
+      continue;
+     case USB_PROD_CONTROLLER:
      case USB_PROD_TRACKER:
+      // Endpoint for IMU
       tracker->endpoints[0].tracker = tracker;
       tracker->endpoints[0].type = TRACKER_IMU;
       tracker->endpoints[0].tx = libusb_alloc_transfer(0);
@@ -359,6 +374,7 @@ int deepdive_usb_init(struct Driver * drv) {
       ret = libusb_submit_transfer(tracker->endpoints[0].tx);
       if(ret)
         goto fail;
+      // Endpoint for light
       tracker->endpoints[1].tracker = tracker;
       tracker->endpoints[1].type = TRACKER_LIGHT;
       tracker->endpoints[1].tx = libusb_alloc_transfer(0);
@@ -368,6 +384,18 @@ int deepdive_usb_init(struct Driver * drv) {
         USB_ENDPOINT_LIGHT, tracker->endpoints[1].buffer,
         USB_INT_BUFF_LENGTH, interrupt_handler, &tracker->endpoints[1], 0);
       ret = libusb_submit_transfer(tracker->endpoints[1].tx);
+      if(ret)
+        goto fail;
+      // Endpoint for buttons
+      tracker->endpoints[2].tracker = tracker;
+      tracker->endpoints[2].type = TRACKER_BUTTONS;
+      tracker->endpoints[2].tx = libusb_alloc_transfer(0);
+      if (!tracker->endpoints[2].tx)
+        goto fail;
+      libusb_fill_interrupt_transfer(tracker->endpoints[2].tx, tracker->udev,
+        USB_ENDPOINT_BUTTONS, tracker->endpoints[2].buffer,
+        USB_INT_BUFF_LENGTH, interrupt_handler, &tracker->endpoints[2], 0);
+      ret = libusb_submit_transfer(tracker->endpoints[2].tx);
       if(ret)
         goto fail;
       // Send a magic code to power on the tracker
@@ -410,10 +438,6 @@ int deepdive_usb_init(struct Driver * drv) {
       break;
     }
     // Add the tracker to the dynamic list of trackers
-    struct Tracker **old_trackers = drv->trackers;
-    drv->trackers = malloc(sizeof(struct Tracker*) * drv->num_trackers + 1);
-    for (size_t i = 0; i < drv->num_trackers; i++)
-      drv->trackers[i] = old_trackers[i];
     drv->trackers[drv->num_trackers++] = tracker;
     continue;
 

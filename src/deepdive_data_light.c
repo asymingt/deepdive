@@ -127,8 +127,8 @@ static void decode_packet(struct Tracker *tracker, uint8_t id,
   lh->mode_current = *(int8_t*)(data + 0x1f);
   lh->sys_faults = *(int8_t*)(data + 0x20);
   lh->timestamp = tc;
-  printf("[%10u] Tracker # %s rx config for LH %s (id: %u)\n",
-    tc, tracker->serial, lh->serial, id);
+  // printf("[%10u] Tracker # %s rx config for LH %s (id: %u)\n",
+  //  tc, tracker->serial, lh->serial, id);
 
   // There is no guarantee that two given trackers will enumerate the
   // same lighthouses as id 0 and id 1. So we need a lookup!
@@ -294,6 +294,9 @@ void handle_measurements(struct Tracker * tracker) {
   lh = lcd->per_sweep.activeLighthouse;
   ax = lcd->per_sweep.activeAcode & 1;
 
+  // Get the rotation based on the axis and negate Y to 
+  uint8_t motor = (ax == 0 ? MOTOR_AXIS0 : MOTOR_AXIS1);
+
   // Copy over the final data
   num_sensors = 0;
   for (int i = 0; i < MAX_NUM_SENSORS; i++) {
@@ -316,7 +319,7 @@ void handle_measurements(struct Tracker * tracker) {
   if (num_sensors > 0 && tracker->ootx[lh].lighthouse) {
     if (tracker->driver->lig_fn)
       tracker->driver->lig_fn(tracker, tracker->ootx[lh].lighthouse,
-        ax, st, num_sensors, sensors, sweeptimes, angles, lengths);
+        motor, st, num_sensors, sensors, sweeptimes, angles, lengths);
   }
 
   // Clear memory
