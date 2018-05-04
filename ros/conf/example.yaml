@@ -1,20 +1,3 @@
-# CALIBRATION PARAMETERS
-#
-# The calibration node is responsible for estimating and maintaining the
-# fixed transforms from the world to lighthouse, and from the set of
-# rigidly connected trackers to what we consider to be the body frame. It
-# does so by framing the localization problem as least-square error
-# minimization over a connected graph
-#
-# Our approach uses only light measurements and pose corrections to solve
-# for the lighthouse positions in the world frame and the transforms of
-# the trackers (mechanical frame) with respect to the body frame..
-#
-# If the calibration procedure works as expected, we'll have a set of
-# lighthouse -> world and tracker -> tracker/body transforms. We'll then
-# write these to a calibration file, which is written to the default ROS
-# working directory (~/.ros) and persisted across restarts.
-
 # GENERAL OPTIONS
 
 # Parent frame is the "world" frame, and child frame is typically "truth",
